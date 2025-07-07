@@ -1,4 +1,4 @@
-package conc
+package gocurrent
 
 import (
 	"fmt"

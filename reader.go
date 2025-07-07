@@ -1,4 +1,4 @@
-package conc
+package gocurrent
 
 import (
 	"errors"
@@ -7,11 +7,12 @@ import (
 	"net"
 )
 
-// Type of the reader method used by the Reader goroutine primitive.
+// ReaderFunc is the type of the reader method used by the Reader goroutine primitive.
 type ReaderFunc[R any] func() (msg R, err error)
 
-// The typed Reader goroutine which calls a Read method to return data
-// over a channel.
+// Reader is a typed Reader goroutine which calls a Read method to return data
+// over a channel. It continuously calls the reader function and sends results
+// to a channel wrapped in Message structs.
 type Reader[R any] struct {
 	RunnerBase[string]
 	msgChannel chan Message[R]
@@ -19,9 +20,9 @@ type Reader[R any] struct {
 	OnDone     func(r *Reader[R])
 }
 
-// Creates a new reader instance.   Just like time.Ticker, this initializer
-// also starts the Reader loop.   It is upto the caller to Stop this reader when
-// done with.  Not doing so can risk the reader to run indefinitely.
+// NewReader creates a new reader instance. Just like time.Ticker, this initializer
+// also starts the Reader loop. It is up to the caller to Stop this reader when
+// done with it. Not doing so can risk the reader to run indefinitely.
 func NewReader[R any](read ReaderFunc[R]) *Reader[R] {
 	out := Reader[R]{
 		RunnerBase: NewRunnerBase("stop"),
@@ -39,7 +40,7 @@ func (r *Reader[R]) DebugInfo() any {
 	}
 }
 
-// Returns the channel onwhich messages can be received.
+// RecvChan returns the channel on which messages can be received.
 func (rc *Reader[R]) RecvChan() <-chan Message[R] {
 	return rc.msgChannel
 }
@@ -66,7 +67,7 @@ func (rc *Reader[R]) start() {
 					}
 				}
 				if err != nil {
-					slog.Debug("Read Error: ", err)
+					slog.Debug("Read Error: ", "error", err)
 					break
 				}
 			}

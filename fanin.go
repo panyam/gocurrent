@@ -1,4 +1,4 @@
-package conc
+package gocurrent
 
 import "log"
 
@@ -8,9 +8,12 @@ type fanInCmd[T any] struct {
 	RemovedChannel <-chan T
 }
 
+// FanIn merges multiple input channels into a single output channel.
+// It implements the fan-in concurrency pattern where messages from multiple
+// sources are combined into one stream.
 type FanIn[T any] struct {
 	RunnerBase[fanInCmd[T]]
-	// Called when a channel is removed so the caller can
+	// OnChannelRemoved is called when a channel is removed so the caller can
 	// perform other cleanups etc based on this
 	OnChannelRemoved func(fi *FanIn[T], inchan <-chan T)
 
@@ -19,6 +22,9 @@ type FanIn[T any] struct {
 	outChan    chan T
 }
 
+// NewFanIn creates a new FanIn that merges multiple input channels into outChan.
+// If outChan is nil, a new channel is created and owned by the FanIn.
+// The FanIn starts running immediately upon creation.
 func NewFanIn[T any](outChan chan T) *FanIn[T] {
 	selfOwnOut := false
 	if outChan == nil {
@@ -34,10 +40,14 @@ func NewFanIn[T any](outChan chan T) *FanIn[T] {
 	return out
 }
 
+// RecvChan returns the channel on which merged output can be received.
 func (fi *FanIn[T]) RecvChan() chan T {
 	return fi.outChan
 }
 
+// Add adds one or more input channels to the FanIn.
+// Messages from these channels will be merged into the output channel.
+// Panics if any input channel is nil.
 func (fi *FanIn[T]) Add(inputs ...<-chan T) {
 	for _, input := range inputs {
 		if input == nil {
@@ -47,11 +57,13 @@ func (fi *FanIn[T]) Add(inputs ...<-chan T) {
 	}
 }
 
-// Remove an input channel from our monitor list.
+// Remove removes an input channel from the FanIn's monitor list.
+// The channel will no longer contribute to the merged output.
 func (fi *FanIn[T]) Remove(target <-chan T) {
 	fi.controlChan <- fanInCmd[T]{Name: "remove", RemovedChannel: target}
 }
 
+// Count returns the number of input channels currently being monitored.
 func (fi *FanIn[T]) Count() int {
 	return len(fi.inputs)
 }

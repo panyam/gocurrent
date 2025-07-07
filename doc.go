@@ -1,2 +1,19 @@
-// The conc package contains a few utilities for basic concurrency patterns that have wide uses.
-package conc
+// Package gocurrent provides utilities for common Go concurrency patterns.
+//
+// This package implements several concurrency primitives inspired by Rob Pike's
+// concurrency patterns from his talk "Go Concurrency Patterns" (https://go.dev/talks/2012/concurrency.slide).
+//
+// The main components include:
+//
+//   - Reader: A goroutine wrapper that continuously calls a reader function and sends results to a channel
+//   - Writer: A goroutine for serializing writes using a writer callback
+//   - Mapper: Transform and/or filter data between channels
+//   - Reducer: Collect and reduce N values from an input channel with configurable time windows
+//   - Pipe: Connect a reader and writer channel with identity transform
+//   - FanIn: Merge multiple input channels into a single output channel
+//   - FanOut: Distribute messages from one channel to multiple output channels
+//   - Map: A thread-safe map with read/write locking capabilities
+//
+// All concurrency primitives are designed to be composable and provide
+// fine-grained control over goroutine lifecycles and resource management.
+package gocurrent

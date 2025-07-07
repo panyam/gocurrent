@@ -1,4 +1,4 @@
-package conc
+package gocurrent
 
 import (
 	"log"
@@ -7,9 +7,9 @@ import (
 )
 
 // Reducer is a way to collect messages of type T in some kind of window
-// and reduce them to type U.  For example this could be used to batch messages
-// into a list every 10 seconds.  Alternatively if a time based window is not
-// used a reduction can be invokved manually.
+// and reduce them to type U. For example this could be used to batch messages
+// into a list every 10 seconds. Alternatively if a time based window is not
+// used a reduction can be invoked manually.
 type Reducer[T any, U any] struct {
 	FlushPeriod   time.Duration
 	ReduceFunc    func(inputs []T) (outputs U)
@@ -27,15 +27,15 @@ type reducerCmd[T any] struct {
 	Channel chan T
 }
 
-// A Reducer that simply collects events of type T into a list (of type []T)
+// NewIDReducer creates a Reducer that simply collects events of type T into a list (of type []T).
 func NewIDReducer[T any](inputChan chan T, outputChan chan []T) *Reducer[T, []T] {
 	out := NewReducer(inputChan, outputChan)
 	out.ReduceFunc = IDFunc[[]T]
 	return out
 }
 
-// The reducer over generic input and output types.  The input channel
-// can be provided on which the reducer will read messages.  If an input
+// NewReducer creates a reducer over generic input and output types. The input channel
+// can be provided on which the reducer will read messages. If an input
 // channel is not provided then the reducer will create one (and own its
 // lifecycle).
 // Just like other runners, the Reducer starts as soon as it is created.
@@ -62,17 +62,17 @@ func NewReducer[T any, U any](inputChan chan T, outputChan chan U) *Reducer[T, U
 	return out
 }
 
-// The channel onto which messages can be sent (to be reduced)
+// SendChan returns the channel onto which messages can be sent (to be reduced).
 func (fo *Reducer[T, U]) SendChan() chan<- T {
 	return fo.inputChan
 }
 
-// Send a mesasge/value onto this reducer for (eventual) reduction.
+// Send sends a message/value onto this reducer for (eventual) reduction.
 func (fo *Reducer[T, U]) Send(value T) {
 	fo.inputChan <- value
 }
 
-// Stops the reducer and closes all channels it owns.
+// Stop stops the reducer and closes all channels it owns.
 func (fo *Reducer[T, U]) Stop() {
 	fo.cmdChan <- reducerCmd[U]{Name: "stop"}
 	fo.wg.Wait()
@@ -110,6 +110,7 @@ func (fo *Reducer[T, U]) start() {
 	}()
 }
 
+// Flush immediately processes all pending events and sends the result to the output channel.
 func (fo *Reducer[T, U]) Flush() {
 	if len(fo.pendingEvents) > 0 {
 		log.Printf("Flushing %d messages.", len(fo.pendingEvents))

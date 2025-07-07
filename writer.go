@@ -1,22 +1,23 @@
-package conc
+package gocurrent
 
 import (
 	"log"
 )
 
-// Type of the writer method used by the writer goroutine primitive to serialize its writes.
+// WriterFunc is the type of the writer method used by the writer goroutine primitive to serialize its writes.
 type WriterFunc[W any] func(W) error
 
-// The typed Writer goroutine type which calls the Write method when it serializes it writes.
+// Writer is a typed Writer goroutine type which calls the Write method when it serializes its writes.
+// It provides a way to serialize concurrent writes through a single goroutine.
 type Writer[W any] struct {
 	RunnerBase[string]
 	msgChannel chan W
 	Write      WriterFunc[W]
 }
 
-// Creates a new writer instance.   Just like time.Ticker, this initializer
-// also starts the Writer loop.   It is upto the caller to Stop this writer when
-// done with.  Not doing so can risk the writer to run indefinitely.
+// NewWriter creates a new writer instance. Just like time.Ticker, this initializer
+// also starts the Writer loop. It is up to the caller to Stop this writer when
+// done with it. Not doing so can risk the writer to run indefinitely.
 func NewWriter[W any](write WriterFunc[W]) *Writer[W] {
 	out := Writer[W]{
 		RunnerBase: NewRunnerBase("stop"),
@@ -43,7 +44,7 @@ func (ch *Writer[T]) cleanup() {
 	ch.RunnerBase.cleanup()
 }
 
-// Returns the channel on which messages can be sent to the Writer.
+// SendChan returns the channel on which messages can be sent to the Writer.
 func (wc *Writer[W]) SendChan() chan W {
 	if !wc.IsRunning() {
 		return nil
@@ -52,7 +53,7 @@ func (wc *Writer[W]) SendChan() chan W {
 	}
 }
 
-// Sends a message to the Writer.  This is a shortcut for sending
+// Send sends a message to the Writer. This is a shortcut for sending
 // a message to the underlying channel.
 func (wc *Writer[W]) Send(req W) bool {
 	if !wc.IsRunning() || wc.msgChannel == nil {
