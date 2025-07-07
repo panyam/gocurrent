@@ -5,8 +5,8 @@
 //
 // The main components include:
 //
-//   - Reader: A goroutine wrapper that continuously calls a reader function and sends results to a channel
-//   - Writer: A goroutine for serializing writes using a writer callback
+//   - Reader: A goroutine wrapper that continuously calls a reader function and sends results to a channel, with error signaling via ClosedChan()
+//   - Writer: A goroutine for serializing writes using a writer callback, with error signaling via ClosedChan()
 //   - Mapper: Transform and/or filter data between channels
 //   - Reducer: Collect and reduce N values from an input channel with configurable time windows
 //   - Pipe: Connect a reader and writer channel with identity transform
@@ -15,5 +15,6 @@
 //   - Map: A thread-safe map with read/write locking capabilities
 //
 // All concurrency primitives are designed to be composable and provide
-// fine-grained control over goroutine lifecycles and resource management.
+// fine-grained control over goroutine lifecycles, resource management, and
+// error monitoring through completion signaling channels.
 package gocurrent

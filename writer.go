@@ -13,6 +13,7 @@ type Writer[W any] struct {
 	RunnerBase[string]
 	msgChannel chan W
 	Write      WriterFunc[W]
+	closedChan chan error
 }
 
 // NewWriter creates a new writer instance. Just like time.Ticker, this initializer
@@ -23,6 +24,7 @@ func NewWriter[W any](write WriterFunc[W]) *Writer[W] {
 		RunnerBase: NewRunnerBase("stop"),
 		Write:      write,
 		msgChannel: make(chan W),
+		closedChan: make(chan error, 1),
 	}
 	out.start()
 	return &out
@@ -41,6 +43,7 @@ func (ch *Writer[T]) cleanup() {
 	defer log.Println("Finished cleaning up writer: ", v)
 	close(ch.msgChannel)
 	ch.msgChannel = nil
+	close(ch.closedChan)
 	ch.RunnerBase.cleanup()
 }
 
@@ -63,6 +66,11 @@ func (wc *Writer[W]) Send(req W) bool {
 	return true
 }
 
+// ClosedChan returns the channel used to signal when the writer is done
+func (wc *Writer[W]) ClosedChan() <-chan error {
+	return wc.closedChan
+}
+
 // Start writer goroutine
 func (wc *Writer[W]) start() {
 	wc.RunnerBase.start()
@@ -79,6 +87,7 @@ func (wc *Writer[W]) start() {
 				// log.Println("Handled request to write: ", wc.SendChan(), newRequest)
 				if err != nil {
 					log.Println("Write Error: ", err)
+					wc.closedChan <- err
 					return
 				}
 				break

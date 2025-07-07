@@ -17,6 +17,7 @@ type Reader[R any] struct {
 	RunnerBase[string]
 	msgChannel chan Message[R]
 	Read       ReaderFunc[R]
+	closedChan chan error
 	OnDone     func(r *Reader[R])
 }
 
@@ -27,6 +28,7 @@ func NewReader[R any](read ReaderFunc[R]) *Reader[R] {
 	out := Reader[R]{
 		RunnerBase: NewRunnerBase("stop"),
 		Read:       read,
+		closedChan: make(chan error, 1),
 		msgChannel: make(chan Message[R]),
 	}
 	out.start()
@@ -43,6 +45,11 @@ func (r *Reader[R]) DebugInfo() any {
 // RecvChan returns the channel on which messages can be received.
 func (rc *Reader[R]) RecvChan() <-chan Message[R] {
 	return rc.msgChannel
+}
+
+// The channel used to signal when the reader is done
+func (rc *Reader[R]) ClosedChan() <-chan error {
+	return rc.closedChan
 }
 
 func (rc *Reader[R]) start() {
@@ -66,8 +73,9 @@ func (rc *Reader[R]) start() {
 						Error: err,
 					}
 				}
-				if err != nil {
+				if err != nil && !timedOut {
 					slog.Debug("Read Error: ", "error", err)
+					rc.closedChan <- err
 					break
 				}
 			}
@@ -92,5 +100,6 @@ func (r *Reader[T]) cleanup() {
 	oldCh := r.msgChannel
 	r.msgChannel = nil
 	close(oldCh)
+	close(r.closedChan)
 	r.RunnerBase.cleanup()
 }

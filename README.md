@@ -46,6 +46,18 @@ reader := gocurrent.NewReader(func() (string, error) {
 })
 defer reader.Stop()
 
+// Monitor for reader completion or errors
+go func() {
+    select {
+    case err := <-reader.ClosedChan():
+        if err != nil {
+            log.Printf("Reader terminated with error: %v", err)
+        } else {
+            log.Println("Reader completed successfully")
+        }
+    }
+}()
+
 // Process messages
 for msg := range reader.RecvChan() {
     if msg.Error != nil {
@@ -68,6 +80,18 @@ writer := gocurrent.NewWriter(func(data string) error {
     return nil
 })
 defer writer.Stop()
+
+// Monitor for writer completion or errors
+go func() {
+    select {
+    case err := <-writer.ClosedChan():
+        if err != nil {
+            log.Printf("Writer terminated with error: %v", err)
+        } else {
+            log.Println("Writer completed successfully")
+        }
+    }
+}()
 
 // Send data to writer
 writer.Send("Hello")
@@ -231,7 +255,8 @@ safeMap.View(func() {
 - **Composability**: Components can be easily combined
 - **Customizable**: Configurable behavior and filtering
 - **Thread Safety**: Built-in synchronization where needed
-- **Error Handling**: Comprehensive error propagation
+- **Error Handling**: Comprehensive error propagation with completion signaling
+- **Monitoring**: Built-in channels for monitoring goroutine completion and errors
 
 ## Contributing
 
@@ -239,7 +264,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the GPL License.
 
 ## References
 
