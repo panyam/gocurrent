@@ -66,6 +66,11 @@ func NewReducer[T any, C any, U any](inputChan chan T, outputChan chan U) *Reduc
 	return out
 }
 
+// Gets the channel from which we can read "reduced" values from
+func (fo *Reducer[T, C, U]) RecvChan() <-chan U {
+	return fo.outputChan
+}
+
 // SendChan returns the channel onto which messages can be sent (to be reduced).
 func (fo *Reducer[T, C, U]) SendChan() chan<- T {
 	return fo.inputChan
