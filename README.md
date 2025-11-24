@@ -123,13 +123,16 @@ result := <-outputChan // "Number: 42"
 
 ### Reducer
 
-Collect and reduce N values from an input channel with configurable time windows.
+Collect and reduce values from an input channel with configurable time windows. The Reducer has three type parameters:
+- `T` - the input event type
+- `C` - the intermediate collection type (where events are batched)
+- `U` - the output type after reduction
 
 ```go
 inputChan := make(chan int, 10)
 outputChan := make(chan []int, 10)
 
-// Create a reducer that collects integers into slices
+// Simple case: Use NewIDReducer to collect events into a slice
 reducer := gocurrent.NewIDReducer(inputChan, outputChan)
 reducer.FlushPeriod = 100 * time.Millisecond
 defer reducer.Stop()
@@ -141,6 +144,25 @@ for i := 0; i < 5; i++ {
 
 // After FlushPeriod, receive the collected batch
 batch := <-outputChan // []int{0, 1, 2, 3, 4}
+```
+
+For custom collection and reduction logic, use `NewReducer` directly:
+
+```go
+// Custom reducer: collect strings into a map, reduce to a summary
+type WordCount map[string]int
+
+reducer := gocurrent.NewReducer[string, WordCount, string](inputChan, outputChan)
+reducer.CollectFunc = func(word string, counts WordCount) (WordCount, bool) {
+    if counts == nil {
+        counts = make(WordCount)
+    }
+    counts[word]++
+    return counts, true
+}
+reducer.ReduceFunc = func(counts WordCount) string {
+    return fmt.Sprintf("Counted %d unique words", len(counts))
+}
 ```
 
 ### Pipe

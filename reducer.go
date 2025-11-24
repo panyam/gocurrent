@@ -10,10 +10,11 @@ import (
 // and reduce them to type U. For example this could be used to batch messages
 // into a list every 10 seconds. Alternatively if a time based window is not
 // used a reduction can be invoked manually.
-type Reducer[T any, U any] struct {
+type Reducer[T any, C any, U any] struct {
 	FlushPeriod   time.Duration
-	ReduceFunc    func(inputs []T) (outputs U)
-	pendingEvents []T
+	CollectFunc   func(input T, collection C) (C, bool)
+	ReduceFunc    func(collectedItems C) (reducedOutputs U)
+	pendingEvents C
 	selfOwnIn     bool
 	inputChan     chan T
 	selfOwnOut    bool
@@ -28,9 +29,12 @@ type reducerCmd[T any] struct {
 }
 
 // NewIDReducer creates a Reducer that simply collects events of type T into a list (of type []T).
-func NewIDReducer[T any](inputChan chan T, outputChan chan []T) *Reducer[T, []T] {
-	out := NewReducer(inputChan, outputChan)
+func NewIDReducer[T any](inputChan chan T, outputChan chan []T) *Reducer[T, []T, []T] {
+	out := NewReducer[T, []T](inputChan, outputChan)
 	out.ReduceFunc = IDFunc[[]T]
+	out.CollectFunc = func(input T, collection []T) ([]T, bool) {
+		return append(collection, input), true
+	}
 	return out
 }
 
@@ -39,7 +43,7 @@ func NewIDReducer[T any](inputChan chan T, outputChan chan []T) *Reducer[T, []T]
 // channel is not provided then the reducer will create one (and own its
 // lifecycle).
 // Just like other runners, the Reducer starts as soon as it is created.
-func NewReducer[T any, U any](inputChan chan T, outputChan chan U) *Reducer[T, U] {
+func NewReducer[T any, C any, U any](inputChan chan T, outputChan chan U) *Reducer[T, C, U] {
 	selfOwnIn := false
 	if inputChan == nil {
 		selfOwnIn = true
@@ -50,7 +54,7 @@ func NewReducer[T any, U any](inputChan chan T, outputChan chan U) *Reducer[T, U
 		selfOwnOut = true
 		outputChan = make(chan U)
 	}
-	out := &Reducer[T, U]{
+	out := &Reducer[T, C, U]{
 		FlushPeriod: 100 * time.Millisecond,
 		cmdChan:     make(chan reducerCmd[U]),
 		inputChan:   inputChan,
@@ -63,22 +67,22 @@ func NewReducer[T any, U any](inputChan chan T, outputChan chan U) *Reducer[T, U
 }
 
 // SendChan returns the channel onto which messages can be sent (to be reduced).
-func (fo *Reducer[T, U]) SendChan() chan<- T {
+func (fo *Reducer[T, C, U]) SendChan() chan<- T {
 	return fo.inputChan
 }
 
 // Send sends a message/value onto this reducer for (eventual) reduction.
-func (fo *Reducer[T, U]) Send(value T) {
+func (fo *Reducer[T, C, U]) Send(value T) {
 	fo.inputChan <- value
 }
 
 // Stop stops the reducer and closes all channels it owns.
-func (fo *Reducer[T, U]) Stop() {
+func (fo *Reducer[T, C, U]) Stop() {
 	fo.cmdChan <- reducerCmd[U]{Name: "stop"}
 	fo.wg.Wait()
 }
 
-func (fo *Reducer[T, U]) start() {
+func (fo *Reducer[T, C, U]) start() {
 	ticker := time.NewTicker(fo.FlushPeriod)
 	fo.wg.Add(1)
 	go func() {
@@ -94,28 +98,24 @@ func (fo *Reducer[T, U]) start() {
 		for {
 			select {
 			case event := <-fo.inputChan:
-				fo.pendingEvents = append(fo.pendingEvents, event)
-				break
+				fo.pendingEvents, _ = fo.CollectFunc(event, fo.pendingEvents)
 			case <-ticker.C:
 				// Flush
 				fo.Flush()
-				break
 			case cmd := <-fo.cmdChan:
 				if cmd.Name == "stop" {
 					return
 				}
-				break
 			}
 		}
 	}()
 }
 
 // Flush immediately processes all pending events and sends the result to the output channel.
-func (fo *Reducer[T, U]) Flush() {
-	if len(fo.pendingEvents) > 0 {
-		log.Printf("Flushing %d messages.", len(fo.pendingEvents))
-		joinedEvents := fo.ReduceFunc(fo.pendingEvents)
-		fo.pendingEvents = nil
-		fo.outputChan <- joinedEvents
-	}
+func (fo *Reducer[T, C, U]) Flush() {
+	log.Printf("Flushing messages.")
+	joinedEvents := fo.ReduceFunc(fo.pendingEvents)
+	var zero C
+	fo.pendingEvents = zero
+	fo.outputChan <- joinedEvents
 }
