@@ -20,6 +20,7 @@ type FanIn[T any] struct {
 	inputs     []*Mapper[T, T]
 	selfOwnOut bool
 	outChan    chan T
+	closedChan chan error
 }
 
 // NewFanIn creates a new FanIn that merges multiple input channels into outChan.
@@ -35,9 +36,15 @@ func NewFanIn[T any](outChan chan T) *FanIn[T] {
 		RunnerBase: NewRunnerBase(fanInCmd[T]{Name: "stop"}),
 		outChan:    outChan,
 		selfOwnOut: selfOwnOut,
+		closedChan: make(chan error, 1),
 	}
 	out.start()
 	return out
+}
+
+// ClosedChan returns the channel used to signal when the fan-in is done
+func (fi *FanIn[T]) ClosedChan() <-chan error {
+	return fi.closedChan
 }
 
 // OutputChan returns the channel on which merged output can be received.
@@ -71,13 +78,13 @@ func (fi *FanIn[T]) Count() int {
 func (fi *FanIn[T]) cleanup() {
 	for _, input := range fi.inputs {
 		input.Stop()
-		fi.wg.Done()
 	}
 	fi.inputs = nil
 	if fi.selfOwnOut {
 		close(fi.outChan)
 	}
 	fi.outChan = nil
+	close(fi.closedChan)
 	fi.RunnerBase.cleanup()
 }
 
@@ -91,7 +98,6 @@ func (fi *FanIn[T]) start() {
 				return
 			} else if cmd.Name == "add" {
 				// Add a new reader to our list
-				fi.wg.Add(1)
 				input := NewPipe(cmd.AddedChannel, fi.outChan)
 				fi.inputs = append(fi.inputs, input)
 				input.OnDone = fi.pipeClosed
@@ -112,7 +118,6 @@ func (fi *FanIn[T]) removeAt(index int) {
 	if fi.OnChannelRemoved != nil {
 		fi.OnChannelRemoved(fi, inchan)
 	}
-	fi.wg.Done()
 }
 
 func (fi *FanIn[T]) pipeClosed(p *Mapper[T, T]) {

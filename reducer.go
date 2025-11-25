@@ -22,6 +22,7 @@ type Reducer[T any, C any, U any] struct {
 	selfOwnOut    bool
 	outputChan    chan U
 	cmdChan       chan reducerCmd[U]
+	closedChan    chan error
 	wg            sync.WaitGroup
 }
 
@@ -64,6 +65,7 @@ func NewReducer[T any, C any, U any](opts ...ReducerOption[T, C, U]) *Reducer[T,
 	out := &Reducer[T, C, U]{
 		FlushPeriod: 100 * time.Millisecond,
 		cmdChan:     make(chan reducerCmd[U]),
+		closedChan:  make(chan error, 1),
 		selfOwnIn:   true,
 		selfOwnOut:  true,
 	}
@@ -80,6 +82,11 @@ func NewReducer[T any, C any, U any](opts ...ReducerOption[T, C, U]) *Reducer[T,
 	}
 	out.start()
 	return out
+}
+
+// ClosedChan returns the channel used to signal when the reducer is done
+func (r *Reducer[T, C, U]) ClosedChan() <-chan error {
+	return r.closedChan
 }
 
 // NewIDReducer creates a Reducer that simply collects events of type T into a list (of type []T).
@@ -135,6 +142,7 @@ func (fo *Reducer[T, C, U]) start() {
 				close(fo.inputChan)
 				fo.inputChan = nil
 			}
+			close(fo.closedChan)
 			fo.wg.Done()
 		}()
 		for {

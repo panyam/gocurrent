@@ -10,8 +10,9 @@ func idMapperFunc[T any](input T) (output T, skip bool, stop bool) {
 // the result to the output channel.
 type Mapper[I any, O any] struct {
 	RunnerBase[string]
-	input  <-chan I
-	output chan<- O
+	input      <-chan I
+	output     chan<- O
+	closedChan chan error
 
 	// MapFunc is applied to each value in the input channel
 	// and returns a tuple of 3 things - outval, skip, stop
@@ -36,9 +37,23 @@ func NewMapper[T any, U any](input <-chan T, output chan<- U, mapper func(T) (U,
 		input:      input,
 		output:     output,
 		MapFunc:    mapper,
+		closedChan: make(chan error, 1),
 	}
 	out.start()
 	return out
+}
+
+// ClosedChan returns the channel used to signal when the mapper is done
+func (m *Mapper[I, O]) ClosedChan() <-chan error {
+	return m.closedChan
+}
+
+func (m *Mapper[I, O]) cleanup() {
+	if m.OnDone != nil {
+		m.OnDone(m)
+	}
+	close(m.closedChan)
+	m.RunnerBase.cleanup()
 }
 
 func (m *Mapper[I, O]) start() {

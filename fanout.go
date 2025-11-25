@@ -32,6 +32,7 @@ type FanOut[T any] struct {
 	outputChans     []chan<- T
 	outputSelfOwned []bool
 	outputFilters   []FilterFunc[T]
+	closedChan      chan error
 
 	// In the default mode, the Send method simply writes to an input channel that is read
 	// by the runner loop of this FanOut.  As soon as an event is read, it by default sequentially
@@ -66,9 +67,15 @@ func NewFanOut[T any](inputChan chan T) *FanOut[T] {
 		RunnerBase: NewRunnerBase(fanOutCmd[T]{Name: "stop"}),
 		inputChan:  inputChan,
 		selfOwnIn:  selfOwnIn,
+		closedChan: make(chan error, 1),
 	}
 	out.start()
 	return out
+}
+
+// ClosedChan returns the channel used to signal when the fan-out is done
+func (fo *FanOut[T]) ClosedChan() <-chan error {
+	return fo.closedChan
 }
 
 func (fo *FanOut[T]) DebugInfo() any {
@@ -143,6 +150,7 @@ func (fo *FanOut[T]) cleanup() {
 	fo.outputChans = nil
 	fo.outputFilters = nil
 	fo.outputSelfOwned = nil
+	close(fo.closedChan)
 	fo.RunnerBase.cleanup()
 }
 
