@@ -40,26 +40,18 @@
 
 ## TODO
 
-### Component Standardization - Phase 2: Method Naming (In Progress)
-- [ ] Replace `RecvChan()` with `OutputChan()` across all components
-- [ ] Replace `SendChan()` with `InputChan()` across all components
-- [ ] Update all tests and examples to use new method names
-- [ ] Update README.md with standardized naming
-
-### Component Standardization - Phase 3: Lifecycle Management
-- [ ] Add `ClosedChan() <-chan error` to Mapper, FanIn, FanOut, Reducer
-- [ ] Migrate Reducer to use RunnerBase for consistency
-- [ ] Standardize command patterns across all components
-
-### Component Standardization - Phase 4: Functional Options
+### Component Standardization - Phase 4: Functional Options (Future)
 - [ ] Apply functional options pattern to Reader constructor
 - [ ] Apply functional options pattern to Writer constructor
 - [ ] Apply functional options pattern to Mapper constructor
 - [ ] Apply functional options pattern to FanIn constructor
 - [ ] Apply functional options pattern to FanOut constructor
 
-### API Improvements
+### Component Improvements (Future)
 - [ ] Consider adding overflow handling for Reducer (partial collection when limit is reached)
+- [ ] Migrate Reducer to use RunnerBase for consistency
+- [ ] Add context.Context support for cancellation
+- [ ] Consider adding metrics/observability hooks
 
 ### Documentation
 - [ ] Add more comprehensive examples
