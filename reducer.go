@@ -99,7 +99,9 @@ type ReducerOption2[T any, C any] = ReducerOption[T, C, C]
 // NewReducer2 creates a 2-parameter reducer where collection type equals output type.
 // This is a simpler API for the common case where no type transformation is needed.
 func NewReducer2[T any, C any](opts ...ReducerOption2[T, C]) *Reducer2[T, C] {
-	return NewReducer[T, C, C](opts...)
+	out := NewReducer(opts...)
+	out.ReduceFunc = IDFunc[C]
+	return out
 }
 
 // WithFlushPeriod2 sets the flush period for a Reducer2
@@ -114,23 +116,12 @@ func WithInputChan2[T any, C any](ch chan T) ReducerOption2[T, C] {
 
 // WithOutputChan2 sets the output channel for a Reducer2
 func WithOutputChan2[T any, C any](ch chan C) ReducerOption2[T, C] {
-	return WithOutputChan[T, C, C](ch)
-}
-
-// NewIDReducer creates a Reducer that simply collects events of type T into a list (of type []T).
-func NewIDReducer[T any](opts ...ReducerOption[T, []T, []T]) *Reducer[T, []T, []T] {
-	out := NewReducer(opts...)
-	out.ReduceFunc = IDFunc[[]T]
-	out.CollectFunc = func(input T, collection []T) ([]T, bool) {
-		return append(collection, input), false
-	}
-	return out
+	return WithOutputChan[T, C](ch)
 }
 
 // NewIDReducer2 creates a Reducer2 that simply collects events of type T into a list (of type []T).
-func NewIDReducer2[T any](opts ...ReducerOption2[T, []T]) *Reducer2[T, []T] {
-	out := NewReducer2[T, []T](opts...)
-	out.ReduceFunc = IDFunc[[]T]
+func NewIDReducer[T any](opts ...ReducerOption2[T, []T]) *Reducer2[T, []T] {
+	out := NewReducer2(opts...)
 	out.CollectFunc = func(input T, collection []T) ([]T, bool) {
 		return append(collection, input), false
 	}
@@ -139,9 +130,8 @@ func NewIDReducer2[T any](opts ...ReducerOption2[T, []T]) *Reducer2[T, []T] {
 
 // A reducer that collects a list of items and concats them to a collection
 // This allows producers to send events here in batch mode instead of 1 at a time
-func NewListReducer[T any](opts ...ReducerOption[[]T, []T, []T]) *Reducer[[]T, []T, []T] {
-	out := NewReducer(opts...)
-	out.ReduceFunc = IDFunc[[]T]
+func NewListReducer[T any](opts ...ReducerOption2[[]T, []T]) *Reducer2[[]T, []T] {
+	out := NewReducer2(opts...)
 	out.CollectFunc = func(input []T, collection []T) ([]T, bool) {
 		return append(collection, input...), false
 	}
