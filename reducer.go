@@ -1,7 +1,6 @@
 package gocurrent
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -198,7 +197,6 @@ func (fo *Reducer[T, C, U]) start() {
 
 // Flush immediately processes all pending events and sends the result to the output channel.
 func (fo *Reducer[T, C, U]) Flush() {
-	log.Printf("Flushing messages.")
 	joinedEvents := fo.ReduceFunc(fo.pendingEvents)
 	var zero C
 	fo.pendingEvents = zero
