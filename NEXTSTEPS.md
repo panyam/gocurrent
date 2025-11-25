@@ -2,6 +2,15 @@
 
 ## Recent Changes
 
+### Reducer API Simplification (Completed)
+- ✅ Added `Reducer2[T, C]` type alias for simplified 2-parameter API (where U == C)
+- ✅ Added `NewReducer2()` constructor and helper functions
+- ✅ Added `ReducerOption2[T, C]` type alias for cleaner option signatures
+- ✅ Added `WithFlushPeriod2()`, `WithInputChan2()`, `WithOutputChan2()` option helpers
+- ✅ Added `NewIDReducer2()` helper function
+- ✅ Added tests for Reducer2 API
+- ✅ Maintained full backwards compatibility with 3-parameter `Reducer[T, C, U]`
+
 ### Component Standardization - Phase 3: Lifecycle Consistency (Completed)
 - ✅ Added `ClosedChan() <-chan error` to Mapper for completion signaling
 - ✅ Added `ClosedChan() <-chan error` to FanIn for completion signaling

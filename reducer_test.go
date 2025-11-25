@@ -449,3 +449,58 @@ func TestReducerImmediateFlushOnEveryItem(t *testing.T) {
 	batch3 := withTimeout(t, outputChan)
 	assert.Equal(t, []int{2}, batch3)
 }
+
+func TestReducer2SimpleUsage(t *testing.T) {
+	log.Println("============== TestReducer2SimpleUsage ================")
+	inputChan := make(chan int)
+	outputChan := make(chan []int)
+
+	// Use the simpler 2-parameter API
+	reducer := NewIDReducer2(
+		WithInputChan2[int, []int](inputChan),
+		WithOutputChan2[int, []int](outputChan),
+		WithFlushPeriod2[int, []int](50*time.Millisecond))
+	defer reducer.Stop()
+
+	// Send values
+	go func() {
+		for i := range 5 {
+			inputChan <- i
+		}
+	}()
+
+	// Wait for flush
+	batch := withTimeout(t, outputChan)
+
+	assert.Equal(t, 5, len(batch), "Should have collected 5 items")
+	assert.Equal(t, []int{0, 1, 2, 3, 4}, batch)
+}
+
+func TestReducer2CustomCollectFunc(t *testing.T) {
+	log.Println("============== TestReducer2CustomCollectFunc ================")
+	inputChan := make(chan int)
+	outputChan := make(chan int)
+
+	// Custom reducer2 that sums integers (C == U == int)
+	reducer := NewReducer2[int, int](
+		WithInputChan2[int, int](inputChan),
+		WithOutputChan2[int, int](outputChan),
+		WithFlushPeriod2[int, int](50*time.Millisecond))
+	reducer.CollectFunc = func(input int, sum int) (int, bool) {
+		return sum + input, false
+	}
+	reducer.ReduceFunc = func(sum int) int {
+		return sum
+	}
+	defer reducer.Stop()
+
+	// Send values 1+2+3+4+5 = 15
+	go func() {
+		for i := 1; i <= 5; i++ {
+			inputChan <- i
+		}
+	}()
+
+	result := withTimeout(t, outputChan)
+	assert.Equal(t, 15, result, "Sum should be 15")
+}
