@@ -30,8 +30,10 @@ func ExampleReducer() {
 	outputChan := make(chan []int)
 
 	// Create a reducer that collects integers into slices
-	reducer := NewIDReducer(inputChan, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	reducer := NewIDReducer(
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
 	// Send data
@@ -54,8 +56,10 @@ func TestIDReducer(t *testing.T) {
 	inputChan := make(chan int)
 	outputChan := make(chan []int)
 
-	reducer := NewIDReducer(inputChan, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	reducer := NewIDReducer(
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
 	// Send 5 values
@@ -79,9 +83,11 @@ func TestReducerManualFlush(t *testing.T) {
 	inputChan := make(chan int)
 	outputChan := make(chan []int)
 
-	reducer := NewIDReducer(inputChan, outputChan)
 	// Set a very long flush period so auto-flush doesn't trigger
-	reducer.FlushPeriod = 10 * time.Second
+	reducer := NewIDReducer(
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](10*time.Second))
 	defer reducer.Stop()
 
 	// Send values
@@ -109,8 +115,10 @@ func TestReducerMultipleBatches(t *testing.T) {
 	inputChan := make(chan int)
 	outputChan := make(chan []int, 10)
 
-	reducer := NewIDReducer(inputChan, outputChan)
-	reducer.FlushPeriod = 30 * time.Millisecond
+	reducer := NewIDReducer(
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](30*time.Millisecond))
 	defer reducer.Stop()
 
 	// Send first batch
@@ -138,8 +146,10 @@ func TestReducerCustomCollectFunc(t *testing.T) {
 	outputChan := make(chan int)
 
 	// Custom reducer that sums integers
-	reducer := NewReducer[int, int, int](inputChan, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	reducer := NewReducer[int, int, int](
+		WithInputChan[int, int, int](inputChan),
+		WithOutputChan[int, int, int](outputChan),
+		WithFlushPeriod[int, int, int](50*time.Millisecond))
 	reducer.CollectFunc = func(input int, sum int) (int, bool) {
 		return sum + input, true
 	}
@@ -166,8 +176,10 @@ func TestReducerWithMapCollection(t *testing.T) {
 	inputChan := make(chan string)
 	outputChan := make(chan int)
 
-	reducer := NewReducer[string, WordCount, int](inputChan, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	reducer := NewReducer[string, WordCount, int](
+		WithInputChan[string, WordCount, int](inputChan),
+		WithOutputChan[string, WordCount, int](outputChan),
+		WithFlushPeriod[string, WordCount, int](50*time.Millisecond))
 	reducer.CollectFunc = func(word string, counts WordCount) (WordCount, bool) {
 		if counts == nil {
 			counts = make(WordCount)
@@ -196,9 +208,10 @@ func TestReducerNilInputChannel(t *testing.T) {
 	log.Println("============== TestReducerNilInputChannel ================")
 	outputChan := make(chan []int)
 
-	// Pass nil input channel - reducer should create its own
-	reducer := NewIDReducer(nil, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	// Don't provide input channel - reducer should create its own
+	reducer := NewIDReducer(
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
 	// Use the reducer's send channel
@@ -216,8 +229,9 @@ func TestReducerSendChan(t *testing.T) {
 	log.Println("============== TestReducerSendChan ================")
 	outputChan := make(chan []int)
 
-	reducer := NewIDReducer(nil, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	reducer := NewIDReducer(
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
 	sendChan := reducer.SendChan()
@@ -237,8 +251,10 @@ func TestReducerStop(t *testing.T) {
 	inputChan := make(chan int)
 	outputChan := make(chan []int, 10)
 
-	reducer := NewIDReducer(inputChan, outputChan)
-	reducer.FlushPeriod = 1 * time.Second // Long period
+	reducer := NewIDReducer(
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](1*time.Second)) // Long period
 
 	// Send some data
 	go func() {
@@ -268,8 +284,10 @@ func TestReducerEmptyFlush(t *testing.T) {
 	inputChan := make(chan int)
 	outputChan := make(chan []int, 10)
 
-	reducer := NewIDReducer(inputChan, outputChan)
-	reducer.FlushPeriod = 30 * time.Millisecond
+	reducer := NewIDReducer(
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](30*time.Millisecond))
 	defer reducer.Stop()
 
 	// Don't send any data, just wait for a flush
@@ -291,8 +309,10 @@ func TestReducerWithStructCollection(t *testing.T) {
 	inputChan := make(chan int)
 	outputChan := make(chan float64)
 
-	reducer := NewReducer[int, Stats, float64](inputChan, outputChan)
-	reducer.FlushPeriod = 50 * time.Millisecond
+	reducer := NewReducer[int, Stats, float64](
+		WithInputChan[int, Stats, float64](inputChan),
+		WithOutputChan[int, Stats, float64](outputChan),
+		WithFlushPeriod[int, Stats, float64](50*time.Millisecond))
 	reducer.CollectFunc = func(input int, stats Stats) (Stats, bool) {
 		stats.Sum += input
 		stats.Count++

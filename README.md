@@ -128,13 +128,21 @@ Collect and reduce values from an input channel with configurable time windows. 
 - `C` - the intermediate collection type (where events are batched)
 - `U` - the output type after reduction
 
+Reducers use functional options for configuration:
+
 ```go
+// Simple case: Use NewIDReducer to collect events into a slice
+// With all defaults (creates its own channels, 100ms flush period)
+reducer := gocurrent.NewIDReducer[int]()
+defer reducer.Stop()
+
+// With custom configuration
 inputChan := make(chan int, 10)
 outputChan := make(chan []int, 10)
-
-// Simple case: Use NewIDReducer to collect events into a slice
-reducer := gocurrent.NewIDReducer(inputChan, outputChan)
-reducer.FlushPeriod = 100 * time.Millisecond
+reducer := gocurrent.NewIDReducer[int](
+    gocurrent.WithInputChan[int, []int, []int](inputChan),
+    gocurrent.WithOutputChan[int, []int, []int](outputChan),
+    gocurrent.WithFlushPeriod[int, []int, []int](100 * time.Millisecond))
 defer reducer.Stop()
 
 // Send data
@@ -152,7 +160,12 @@ For custom collection and reduction logic, use `NewReducer` directly:
 // Custom reducer: collect strings into a map, reduce to a summary
 type WordCount map[string]int
 
-reducer := gocurrent.NewReducer[string, WordCount, string](inputChan, outputChan)
+inputChan := make(chan string, 10)
+outputChan := make(chan string, 10)
+reducer := gocurrent.NewReducer[string, WordCount, string](
+    gocurrent.WithInputChan[string, WordCount, string](inputChan),
+    gocurrent.WithOutputChan[string, WordCount, string](outputChan),
+    gocurrent.WithFlushPeriod[string, WordCount, string](100 * time.Millisecond))
 reducer.CollectFunc = func(word string, counts WordCount) (WordCount, bool) {
     if counts == nil {
         counts = make(WordCount)

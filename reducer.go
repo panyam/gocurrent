@@ -28,9 +28,61 @@ type reducerCmd[T any] struct {
 	Channel chan T
 }
 
+// ReducerOption is a functional option for configuring a Reducer
+type ReducerOption[T any, C any, U any] func(*Reducer[T, C, U])
+
+// WithFlushPeriod sets the flush period for the reducer
+func WithFlushPeriod[T any, C any, U any](period time.Duration) ReducerOption[T, C, U] {
+	return func(r *Reducer[T, C, U]) {
+		r.FlushPeriod = period
+	}
+}
+
+// WithInputChan sets the input channel for the reducer
+func WithInputChan[T any, C any, U any](ch chan T) ReducerOption[T, C, U] {
+	return func(r *Reducer[T, C, U]) {
+		r.inputChan = ch
+		r.selfOwnIn = false
+	}
+}
+
+// WithOutputChan sets the output channel for the reducer
+func WithOutputChan[T any, C any, U any](ch chan U) ReducerOption[T, C, U] {
+	return func(r *Reducer[T, C, U]) {
+		r.outputChan = ch
+		r.selfOwnOut = false
+	}
+}
+
+// NewReducer creates a reducer over generic input and output types. Options can be
+// provided to configure the input channel, output channel, flush period, etc.
+// If channels are not provided via options, the reducer will create and own them.
+// Just like other runners, the Reducer starts as soon as it is created.
+func NewReducer[T any, C any, U any](opts ...ReducerOption[T, C, U]) *Reducer[T, C, U] {
+	out := &Reducer[T, C, U]{
+		FlushPeriod: 100 * time.Millisecond,
+		cmdChan:     make(chan reducerCmd[U]),
+		selfOwnIn:   true,
+		selfOwnOut:  true,
+	}
+	// Apply options
+	for _, opt := range opts {
+		opt(out)
+	}
+	// Create channels if not provided via options
+	if out.inputChan == nil {
+		out.inputChan = make(chan T)
+	}
+	if out.outputChan == nil {
+		out.outputChan = make(chan U)
+	}
+	out.start()
+	return out
+}
+
 // NewIDReducer creates a Reducer that simply collects events of type T into a list (of type []T).
-func NewIDReducer[T any](inputChan chan T, outputChan chan []T) *Reducer[T, []T, []T] {
-	out := NewReducer[T, []T](inputChan, outputChan)
+func NewIDReducer[T any](opts ...ReducerOption[T, []T, []T]) *Reducer[T, []T, []T] {
+	out := NewReducer(opts...)
 	out.ReduceFunc = IDFunc[[]T]
 	out.CollectFunc = func(input T, collection []T) ([]T, bool) {
 		return append(collection, input), true
@@ -38,31 +90,14 @@ func NewIDReducer[T any](inputChan chan T, outputChan chan []T) *Reducer[T, []T,
 	return out
 }
 
-// NewReducer creates a reducer over generic input and output types. The input channel
-// can be provided on which the reducer will read messages. If an input
-// channel is not provided then the reducer will create one (and own its
-// lifecycle).
-// Just like other runners, the Reducer starts as soon as it is created.
-func NewReducer[T any, C any, U any](inputChan chan T, outputChan chan U) *Reducer[T, C, U] {
-	selfOwnIn := false
-	if inputChan == nil {
-		selfOwnIn = true
-		inputChan = make(chan T)
+// A reducer that collects a list of items and concats them to a collection
+// This allows producers to send events here in batch mode instead of 1 at a time
+func NewListReducer[T any](opts ...ReducerOption[[]T, []T, []T]) *Reducer[[]T, []T, []T] {
+	out := NewReducer(opts...)
+	out.ReduceFunc = IDFunc[[]T]
+	out.CollectFunc = func(input []T, collection []T) ([]T, bool) {
+		return append(collection, input...), true
 	}
-	selfOwnOut := false
-	if outputChan == nil {
-		selfOwnOut = true
-		outputChan = make(chan U)
-	}
-	out := &Reducer[T, C, U]{
-		FlushPeriod: 100 * time.Millisecond,
-		cmdChan:     make(chan reducerCmd[U]),
-		inputChan:   inputChan,
-		selfOwnIn:   selfOwnIn,
-		outputChan:  outputChan,
-		selfOwnOut:  selfOwnOut,
-	}
-	out.start()
 	return out
 }
 
