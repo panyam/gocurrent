@@ -32,7 +32,7 @@ func ExampleReducer() {
 	// Create a reducer that collects integers into slices
 	reducer := NewIDReducer(
 		WithInputChan[int, []int, []int](inputChan),
-		WithOutputChan[int, []int, []int](outputChan),
+		WithOutputChan[int, []int](outputChan),
 		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
@@ -58,7 +58,7 @@ func TestIDReducer(t *testing.T) {
 
 	reducer := NewIDReducer(
 		WithInputChan[int, []int, []int](inputChan),
-		WithOutputChan[int, []int, []int](outputChan),
+		WithOutputChan[int, []int](outputChan),
 		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
@@ -151,7 +151,7 @@ func TestReducerCustomCollectFunc(t *testing.T) {
 		WithOutputChan[int, int, int](outputChan),
 		WithFlushPeriod[int, int, int](50*time.Millisecond))
 	reducer.CollectFunc = func(input int, sum int) (int, bool) {
-		return sum + input, true
+		return sum + input, false
 	}
 	reducer.ReduceFunc = func(sum int) int {
 		return sum
@@ -185,7 +185,7 @@ func TestReducerWithMapCollection(t *testing.T) {
 			counts = make(WordCount)
 		}
 		counts[word]++
-		return counts, true
+		return counts, false
 	}
 	reducer.ReduceFunc = func(counts WordCount) int {
 		return len(counts) // Return unique word count
@@ -316,7 +316,7 @@ func TestReducerWithStructCollection(t *testing.T) {
 	reducer.CollectFunc = func(input int, stats Stats) (Stats, bool) {
 		stats.Sum += input
 		stats.Count++
-		return stats, true
+		return stats, false
 	}
 	reducer.ReduceFunc = func(stats Stats) float64 {
 		if stats.Count == 0 {
@@ -335,4 +335,117 @@ func TestReducerWithStructCollection(t *testing.T) {
 
 	avg := withTimeout(t, outputChan)
 	assert.Equal(t, 6.0, avg, "Average should be 6.0")
+}
+
+func TestReducerLengthBasedFlush(t *testing.T) {
+	log.Println("============== TestReducerLengthBasedFlush ================")
+	inputChan := make(chan int)
+	outputChan := make(chan []int, 10)
+
+	// Create a reducer that flushes when collection reaches 5 items
+	reducer := NewReducer[int, []int, []int](
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](10*time.Second)) // Long period to avoid time-based flush
+	reducer.ReduceFunc = IDFunc[[]int]
+	reducer.CollectFunc = func(input int, collection []int) ([]int, bool) {
+		newCollection := append(collection, input)
+		shouldFlush := len(newCollection) >= 5
+		return newCollection, shouldFlush
+	}
+	defer reducer.Stop()
+
+	// Send 12 items - should get 2 batches of 5 and then wait for timer
+	go func() {
+		for i := 0; i < 12; i++ {
+			inputChan <- i
+		}
+	}()
+
+	// Should get first batch of 5
+	batch1 := withTimeout(t, outputChan)
+	assert.Equal(t, 5, len(batch1), "First batch should have 5 items")
+	assert.Equal(t, []int{0, 1, 2, 3, 4}, batch1)
+
+	// Should get second batch of 5
+	batch2 := withTimeout(t, outputChan)
+	assert.Equal(t, 5, len(batch2), "Second batch should have 5 items")
+	assert.Equal(t, []int{5, 6, 7, 8, 9}, batch2)
+
+	// Remaining 2 items should not trigger immediate flush
+	// (would need manual flush or timer)
+}
+
+func TestReducerCustomFlushCriteria(t *testing.T) {
+	log.Println("============== TestReducerCustomFlushCriteria ================")
+	inputChan := make(chan int)
+	outputChan := make(chan int, 10)
+
+	// Create a reducer that flushes when sum exceeds 100
+	reducer := NewReducer[int, int, int](
+		WithInputChan[int, int, int](inputChan),
+		WithOutputChan[int, int, int](outputChan),
+		WithFlushPeriod[int, int, int](10*time.Second))
+	reducer.CollectFunc = func(input int, sum int) (int, bool) {
+		newSum := sum + input
+		shouldFlush := newSum > 100
+		return newSum, shouldFlush
+	}
+	reducer.ReduceFunc = func(sum int) int {
+		return sum
+	}
+	defer reducer.Stop()
+
+	// Send values that will accumulate past 100
+	go func() {
+		inputChan <- 30
+		inputChan <- 40
+		inputChan <- 35 // Total: 105, should trigger flush
+		inputChan <- 20
+		inputChan <- 50
+		inputChan <- 40 // Total: 110, should trigger second flush
+	}()
+
+	// First flush when sum > 100
+	result1 := withTimeout(t, outputChan)
+	assert.Equal(t, 105, result1, "First flush should be 105")
+
+	// Second flush when sum > 100 again
+	result2 := withTimeout(t, outputChan)
+	assert.Equal(t, 110, result2, "Second flush should be 110")
+}
+
+func TestReducerImmediateFlushOnEveryItem(t *testing.T) {
+	log.Println("============== TestReducerImmediateFlushOnEveryItem ================")
+	inputChan := make(chan int)
+	outputChan := make(chan []int, 10)
+
+	// Create a reducer that flushes on every single item
+	reducer := NewReducer[int, []int, []int](
+		WithInputChan[int, []int, []int](inputChan),
+		WithOutputChan[int, []int, []int](outputChan),
+		WithFlushPeriod[int, []int, []int](10*time.Second))
+	reducer.ReduceFunc = IDFunc[[]int]
+	reducer.CollectFunc = func(input int, collection []int) ([]int, bool) {
+		return append(collection, input), true // Always flush
+	}
+	defer reducer.Stop()
+
+	// Send 3 items
+	go func() {
+		for i := 0; i < 3; i++ {
+			inputChan <- i
+			time.Sleep(5 * time.Millisecond) // Small delay to allow flush processing
+		}
+	}()
+
+	// Should get 3 separate batches, each with 1 item
+	batch1 := withTimeout(t, outputChan)
+	assert.Equal(t, []int{0}, batch1)
+
+	batch2 := withTimeout(t, outputChan)
+	assert.Equal(t, []int{1}, batch2)
+
+	batch3 := withTimeout(t, outputChan)
+	assert.Equal(t, []int{2}, batch3)
 }

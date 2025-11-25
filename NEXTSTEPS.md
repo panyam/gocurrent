@@ -2,6 +2,12 @@
 
 ## Recent Changes
 
+### Custom Flush Triggers for Reducer (Completed)
+- ✅ Repurposed `CollectFunc` bool return value to signal when to flush
+- ✅ Updated `start()` method to trigger immediate flush when `CollectFunc` returns true
+- ✅ Added comprehensive tests for length-based, custom criteria, and immediate flush scenarios
+- ✅ All existing tests continue to pass
+
 ### Functional Options Pattern for Reducer (Completed)
 - ✅ Migrated `NewReducer` and `NewIDReducer` to use functional options pattern
 - ✅ Added `ReducerOption[T, C, U]` type for configuration
@@ -13,7 +19,7 @@
 
 ### API Improvements
 - [ ] Consider applying functional options pattern to other constructors (Reader, Writer, Mapper, etc.)
-- [ ] Add more reducer options as needed (e.g., buffer sizes, custom flush triggers)
+- [ ] Consider adding overflow handling for Reducer (partial collection when limit is reached)
 
 ### Documentation
 - [ ] Add more comprehensive examples

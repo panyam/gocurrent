@@ -171,11 +171,34 @@ reducer.CollectFunc = func(word string, counts WordCount) (WordCount, bool) {
         counts = make(WordCount)
     }
     counts[word]++
-    return counts, true
+    return counts, false // Return true to trigger immediate flush
 }
 reducer.ReduceFunc = func(counts WordCount) string {
     return fmt.Sprintf("Counted %d unique words", len(counts))
 }
+```
+
+#### Custom Flush Triggers
+
+The `CollectFunc` can signal when to flush by returning `true` as the second return value. This enables custom flush criteria beyond time-based flushing:
+
+```go
+// Length-based flush: flush when collection reaches 100 items
+reducer.CollectFunc = func(input int, collection []int) ([]int, bool) {
+    newCollection := append(collection, input)
+    shouldFlush := len(newCollection) >= 100
+    return newCollection, shouldFlush
+}
+
+// Custom criteria: flush when sum exceeds threshold
+reducer.CollectFunc = func(input int, sum int) (int, bool) {
+    newSum := sum + input
+    shouldFlush := newSum > 1000
+    return newSum, shouldFlush
+}
+
+// Manual flush is also available
+reducer.Flush()
 ```
 
 ### Pipe

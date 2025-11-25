@@ -11,7 +11,9 @@ import (
 // into a list every 10 seconds. Alternatively if a time based window is not
 // used a reduction can be invoked manually.
 type Reducer[T any, C any, U any] struct {
-	FlushPeriod   time.Duration
+	FlushPeriod time.Duration
+	// CollectFunc adds an input to the collection and returns the updated collection.
+	// The bool return value indicates whether a flush should be triggered immediately.
 	CollectFunc   func(input T, collection C) (C, bool)
 	ReduceFunc    func(collectedItems C) (reducedOutputs U)
 	pendingEvents C
@@ -85,7 +87,7 @@ func NewIDReducer[T any](opts ...ReducerOption[T, []T, []T]) *Reducer[T, []T, []
 	out := NewReducer(opts...)
 	out.ReduceFunc = IDFunc[[]T]
 	out.CollectFunc = func(input T, collection []T) ([]T, bool) {
-		return append(collection, input), true
+		return append(collection, input), false
 	}
 	return out
 }
@@ -96,7 +98,7 @@ func NewListReducer[T any](opts ...ReducerOption[[]T, []T, []T]) *Reducer[[]T, [
 	out := NewReducer(opts...)
 	out.ReduceFunc = IDFunc[[]T]
 	out.CollectFunc = func(input []T, collection []T) ([]T, bool) {
-		return append(collection, input...), true
+		return append(collection, input...), false
 	}
 	return out
 }
@@ -138,7 +140,11 @@ func (fo *Reducer[T, C, U]) start() {
 		for {
 			select {
 			case event := <-fo.inputChan:
-				fo.pendingEvents, _ = fo.CollectFunc(event, fo.pendingEvents)
+				var shouldFlush bool
+				fo.pendingEvents, shouldFlush = fo.CollectFunc(event, fo.pendingEvents)
+				if shouldFlush {
+					fo.Flush()
+				}
 			case <-ticker.C:
 				// Flush
 				fo.Flush()
