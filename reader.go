@@ -22,18 +22,53 @@ type Reader[R any] struct {
 	OnDone     func(r *Reader[R])
 }
 
-// NewReader creates a new reader instance. Just like time.Ticker, this initializer
-// also starts the Reader loop. It is up to the caller to Stop this reader when
-// done with it. Not doing so can risk the reader to run indefinitely.
-func NewReader[R any](read ReaderFunc[R]) *Reader[R] {
-	out := Reader[R]{
+// ReaderOption is a functional option for configuring a Reader
+type ReaderOption[R any] func(*Reader[R])
+
+// WithOutputBuffer sets the buffer size for the output channel
+func WithOutputBuffer[R any](size int) ReaderOption[R] {
+	return func(r *Reader[R]) {
+		r.msgChannel = make(chan Message[R], size)
+	}
+}
+
+// WithOnDone sets the callback to be called when the reader finishes
+func WithOnDone[R any](fn func(*Reader[R])) ReaderOption[R] {
+	return func(r *Reader[R]) {
+		r.OnDone = fn
+	}
+}
+
+// NewReader creates a new reader instance with functional options.
+// The reader function is required as the first parameter, with optional
+// configuration via functional options.
+//
+// Examples:
+//   // Simple usage (backwards compatible)
+//   reader := NewReader(myReaderFunc)
+//
+//   // With options
+//   reader := NewReader(myReaderFunc, WithOutputBuffer[int](10))
+//
+//   // With multiple options
+//   reader := NewReader(myReaderFunc,
+//       WithOutputBuffer[int](100),
+//       WithOnDone(func(r *Reader[int]) { log.Println("done") }))
+func NewReader[R any](read ReaderFunc[R], opts ...ReaderOption[R]) *Reader[R] {
+	out := &Reader[R]{
 		RunnerBase: NewRunnerBase("stop"),
 		Read:       read,
 		closedChan: make(chan error, 1),
-		msgChannel: make(chan Message[R]),
+		msgChannel: make(chan Message[R]), // default unbuffered
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(out)
+	}
+
 	out.start()
-	return &out
+	return out
 }
 
 func (r *Reader[R]) DebugInfo() any {

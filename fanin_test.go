@@ -13,7 +13,7 @@ import (
 func ExampleFanIn() {
 	// Create 5 input channels and send 5 numbers into them
 	// the collector channel
-	fanin := NewFanIn[int](nil)
+	fanin := NewFanIn[int]()
 	defer fanin.Stop()
 
 	NUM_CHANS := 2
@@ -68,7 +68,7 @@ func TestFanIn(t *testing.T) {
 		make(chan int),
 	}
 	outch := make(chan int)
-	fanin := NewFanIn(outch)
+	fanin := NewFanIn(WithFanInOutputChan(outch))
 
 	var vals []int
 	var wg sync.WaitGroup
@@ -113,7 +113,7 @@ func TestMultiReadFanInToFanOut(t *testing.T) {
 		make(chan int),
 	}
 	outch := make(chan int)
-	fanin := NewFanIn(outch)
+	fanin := NewFanIn(WithFanInOutputChan(outch))
 
 	for ch := 0; ch < 5; ch++ {
 		fanin.Add(inch[ch])
@@ -129,7 +129,7 @@ func TestMultiReadFanInToFanOut(t *testing.T) {
 		resch <- val
 		return nil
 	})
-	fanout := NewFanOut[int](nil)
+	fanout := NewFanOut[int]()
 	fanout.Add(writer.InputChan(), nil, false)
 
 	go func() {
@@ -173,7 +173,7 @@ func TestMultiReadFanInFromReaders(t *testing.T) {
 		readers = append(readers, makereader(inch[i]))
 	}
 
-	fanin := NewFanIn[Message[int]](nil)
+	fanin := NewFanIn[Message[int]]()
 	for _, r := range readers {
 		fanin.Add(r.OutputChan())
 	}

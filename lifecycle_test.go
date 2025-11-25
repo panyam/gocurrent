@@ -54,7 +54,7 @@ func TestMapperOnDoneCallback(t *testing.T) {
 
 // TestFanInClosedChan verifies that FanIn signals completion via ClosedChan
 func TestFanInClosedChan(t *testing.T) {
-	fanin := NewFanIn[int](nil)
+	fanin := NewFanIn[int]()
 
 	// Add some input channels
 	in1 := make(chan int)
@@ -81,7 +81,7 @@ func TestFanInClosedChan(t *testing.T) {
 
 // TestFanOutClosedChan verifies that FanOut signals completion via ClosedChan
 func TestFanOutClosedChan(t *testing.T) {
-	fanout := NewFanOut[int](nil)
+	fanout := NewFanOut[int]()
 
 	// Add some outputs
 	out1 := fanout.New(nil)
@@ -203,7 +203,7 @@ func TestStandardizedNaming(t *testing.T) {
 
 	// Test FanIn.OutputChan()
 	t.Run("FanIn.OutputChan", func(t *testing.T) {
-		fanin := NewFanIn[int](nil)
+		fanin := NewFanIn[int]()
 		defer fanin.Stop()
 
 		in1 := make(chan int, 1)
@@ -219,7 +219,7 @@ func TestStandardizedNaming(t *testing.T) {
 
 	// Test FanOut.InputChan()
 	t.Run("FanOut.InputChan", func(t *testing.T) {
-		fanout := NewFanOut[int](nil)
+		fanout := NewFanOut[int]()
 		defer fanout.Stop()
 
 		out := fanout.New(nil)

@@ -159,7 +159,7 @@ type Broadcast[T any] struct {
 
 // NewBroadcast creates a broadcast block using FanOut
 func NewBroadcast[T any](name string) *Broadcast[T] {
-	fanout := NewFanOut[T](nil)
+	fanout := NewFanOut[T]()
 	block := NewBlock(name)
 	block.Add(fanout)
 
@@ -192,7 +192,7 @@ type Merge[T any] struct {
 
 // NewMerge creates a merge block using FanIn
 func NewMerge[T any](name string) *Merge[T] {
-	fanin := NewFanIn[T](nil)
+	fanin := NewFanIn[T]()
 	block := NewBlock(name)
 	block.Add(fanin)
 

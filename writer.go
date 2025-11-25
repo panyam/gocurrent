@@ -16,18 +16,41 @@ type Writer[W any] struct {
 	closedChan chan error
 }
 
-// NewWriter creates a new writer instance. Just like time.Ticker, this initializer
-// also starts the Writer loop. It is up to the caller to Stop this writer when
-// done with it. Not doing so can risk the writer to run indefinitely.
-func NewWriter[W any](write WriterFunc[W]) *Writer[W] {
-	out := Writer[W]{
+// WriterOption is a functional option for configuring a Writer
+type WriterOption[W any] func(*Writer[W])
+
+// WithInputBuffer sets the buffer size for the input channel
+func WithInputBuffer[W any](size int) WriterOption[W] {
+	return func(w *Writer[W]) {
+		w.msgChannel = make(chan W, size)
+	}
+}
+
+// NewWriter creates a new writer instance with functional options.
+// The writer function is required as the first parameter, with optional
+// configuration via functional options.
+//
+// Examples:
+//   // Simple usage (backwards compatible)
+//   writer := NewWriter(myWriterFunc)
+//
+//   // With buffered input
+//   writer := NewWriter(myWriterFunc, WithInputBuffer[int](100))
+func NewWriter[W any](write WriterFunc[W], opts ...WriterOption[W]) *Writer[W] {
+	out := &Writer[W]{
 		RunnerBase: NewRunnerBase("stop"),
 		Write:      write,
-		msgChannel: make(chan W),
+		msgChannel: make(chan W), // default unbuffered
 		closedChan: make(chan error, 1),
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(out)
+	}
+
 	out.start()
-	return &out
+	return out
 }
 
 func (w *Writer[W]) DebugInfo() any {

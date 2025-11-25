@@ -24,14 +24,34 @@ type Mapper[I any, O any] struct {
 	OnDone  func(p *Mapper[I, O])
 }
 
-// NewMapper creates a new mapper between an input and output channel.
+// MapperOption is a functional option for configuring a Mapper
+type MapperOption[I, O any] func(*Mapper[I, O])
+
+// WithMapperOnDone sets the callback to be called when the mapper finishes
+func WithMapperOnDone[I, O any](fn func(*Mapper[I, O])) MapperOption[I, O] {
+	return func(m *Mapper[I, O]) {
+		m.OnDone = fn
+	}
+}
+
+// NewMapper creates a new mapper between an input and output channel with functional options.
 // The ownership of the channels is by the caller and not the Mapper, so they
 // will not be closed when the mapper stops.
 // The mapper function returns (output, skip, stop) where:
 // - output: the transformed value
 // - skip: if true, the output is not sent to the output channel
 // - stop: if true, the mapper stops processing further elements
-func NewMapper[T any, U any](input <-chan T, output chan<- U, mapper func(T) (U, bool, bool)) *Mapper[T, U] {
+//
+// Examples:
+//   // Simple usage (backwards compatible)
+//   mapper := NewMapper(inChan, outChan, myMapperFunc)
+//
+//   // With OnDone callback
+//   mapper := NewMapper(inChan, outChan, myMapperFunc,
+//       WithMapperOnDone(func(m *Mapper[int, string]) {
+//           log.Println("mapper done")
+//       }))
+func NewMapper[T any, U any](input <-chan T, output chan<- U, mapper func(T) (U, bool, bool), opts ...MapperOption[T, U]) *Mapper[T, U] {
 	out := &Mapper[T, U]{
 		RunnerBase: NewRunnerBase("stop"),
 		input:      input,
@@ -39,6 +59,12 @@ func NewMapper[T any, U any](input <-chan T, output chan<- U, mapper func(T) (U,
 		MapFunc:    mapper,
 		closedChan: make(chan error, 1),
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(out)
+	}
+
 	out.start()
 	return out
 }

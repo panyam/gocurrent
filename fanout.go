@@ -52,23 +52,66 @@ type FanOut[T any] struct {
 	SendSync bool
 }
 
-// Creates a new typed FanOut runner.  Every FanOut needs an inputChan
-// from which messages can be read to fan out to listening channels.
-// Ths inputChan can be owned by this FanOut or can be provided by
-// the caller.  If the input channel is provided then it is not closed
-// when the FanOut runner terminates (or is stoopped).
-func NewFanOut[T any](inputChan chan T) *FanOut[T] {
-	selfOwnIn := false
-	if inputChan == nil {
-		selfOwnIn = true
-		inputChan = make(chan T)
+// FanOutOption is a functional option for configuring a FanOut
+type FanOutOption[T any] func(*FanOut[T])
+
+// WithFanOutInputChan sets the input channel for the FanOut
+func WithFanOutInputChan[T any](ch chan T) FanOutOption[T] {
+	return func(fo *FanOut[T]) {
+		fo.inputChan = ch
+		fo.selfOwnIn = false
 	}
+}
+
+// WithFanOutInputBuffer creates a buffered input channel for the FanOut
+func WithFanOutInputBuffer[T any](size int) FanOutOption[T] {
+	return func(fo *FanOut[T]) {
+		fo.inputChan = make(chan T, size)
+		fo.selfOwnIn = true
+	}
+}
+
+// WithFanOutSendSync sets whether sends to output channels should be synchronous
+func WithFanOutSendSync[T any](sync bool) FanOutOption[T] {
+	return func(fo *FanOut[T]) {
+		fo.SendSync = sync
+	}
+}
+
+// NewFanOut creates a new FanOut that fans messages to multiple output channels with functional options.
+// By default, creates and owns an unbuffered input channel. Use options to customize.
+// The FanOut starts running immediately upon creation.
+//
+// Examples:
+//   // Simple usage with owned channel (backwards compatible)
+//   fanout := NewFanOut[int]()
+//
+//   // With existing channel (backwards compatible)
+//   inChan := make(chan int, 10)
+//   fanout := NewFanOut(WithFanOutInputChan(inChan))
+//
+//   // With buffered input
+//   fanout := NewFanOut[int](WithFanOutInputBuffer[int](100))
+//
+//   // With synchronous sends
+//   fanout := NewFanOut[int](WithFanOutSendSync[int](true))
+func NewFanOut[T any](opts ...FanOutOption[T]) *FanOut[T] {
 	out := &FanOut[T]{
 		RunnerBase: NewRunnerBase(fanOutCmd[T]{Name: "stop"}),
-		inputChan:  inputChan,
-		selfOwnIn:  selfOwnIn,
+		selfOwnIn:  true,
 		closedChan: make(chan error, 1),
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(out)
+	}
+
+	// Create default channel if not provided
+	if out.inputChan == nil {
+		out.inputChan = make(chan T)
+	}
+
 	out.start()
 	return out
 }

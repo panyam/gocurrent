@@ -15,7 +15,7 @@ import (
 func ExampleFanOut() {
 	// Create a fanout wiht 5 output channels and see that
 	// numbers sent into the output are read from all of these
-	fanout := NewFanOut[int](nil)
+	fanout := NewFanOut[int]()
 	defer fanout.Stop()
 
 	NUM_CHANS := 2
@@ -59,7 +59,7 @@ func ExampleFanOut() {
 }
 
 func TestFanOut(t *testing.T) {
-	fanout := NewFanOut[int](nil)
+	fanout := NewFanOut[int]()
 	var vals []int
 	var wg sync.WaitGroup
 	var m sync.Mutex
@@ -95,7 +95,7 @@ func TestFanOut(t *testing.T) {
 
 func _TestFanOut_WithClose(t *testing.T) {
 	log.Println("===================== TestFanOutWithClose =====================")
-	fanout := NewFanOut[int](nil)
+	fanout := NewFanOut[int]()
 	// A test where we simulate a hub like scenario where customers keep coming in and out (being added to and removed from the fanout)
 
 	var writers []*Writer[int]

@@ -23,21 +23,63 @@ type FanIn[T any] struct {
 	closedChan chan error
 }
 
-// NewFanIn creates a new FanIn that merges multiple input channels into outChan.
-// If outChan is nil, a new channel is created and owned by the FanIn.
-// The FanIn starts running immediately upon creation.
-func NewFanIn[T any](outChan chan T) *FanIn[T] {
-	selfOwnOut := false
-	if outChan == nil {
-		outChan = make(chan T)
-		selfOwnOut = true
+// FanInOption is a functional option for configuring a FanIn
+type FanInOption[T any] func(*FanIn[T])
+
+// WithFanInOutputChan sets the output channel for the FanIn
+func WithFanInOutputChan[T any](ch chan T) FanInOption[T] {
+	return func(fi *FanIn[T]) {
+		fi.outChan = ch
+		fi.selfOwnOut = false
 	}
+}
+
+// WithFanInOutputBuffer creates a buffered output channel for the FanIn
+func WithFanInOutputBuffer[T any](size int) FanInOption[T] {
+	return func(fi *FanIn[T]) {
+		fi.outChan = make(chan T, size)
+		fi.selfOwnOut = true
+	}
+}
+
+// WithFanInOnChannelRemoved sets the callback for when a channel is removed
+func WithFanInOnChannelRemoved[T any](fn func(*FanIn[T], <-chan T)) FanInOption[T] {
+	return func(fi *FanIn[T]) {
+		fi.OnChannelRemoved = fn
+	}
+}
+
+// NewFanIn creates a new FanIn that merges multiple input channels with functional options.
+// By default, creates and owns an unbuffered output channel. Use options to customize.
+// The FanIn starts running immediately upon creation.
+//
+// Examples:
+//   // Simple usage with owned channel (backwards compatible)
+//   fanin := NewFanIn[int]()
+//
+//   // With existing channel (backwards compatible)
+//   outChan := make(chan int, 10)
+//   fanin := NewFanIn(WithFanInOutputChan(outChan))
+//
+//   // With buffered output
+//   fanin := NewFanIn[int](WithFanInOutputBuffer[int](100))
+func NewFanIn[T any](opts ...FanInOption[T]) *FanIn[T] {
 	out := &FanIn[T]{
 		RunnerBase: NewRunnerBase(fanInCmd[T]{Name: "stop"}),
-		outChan:    outChan,
-		selfOwnOut: selfOwnOut,
+		selfOwnOut: true,
 		closedChan: make(chan error, 1),
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(out)
+	}
+
+	// Create default channel if not provided
+	if out.outChan == nil {
+		out.outChan = make(chan T)
+	}
+
 	out.start()
 	return out
 }
