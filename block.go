@@ -204,7 +204,7 @@ func NewMerge[T any](name string) *Merge[T] {
 
 // OutputChan implements OutputComponent
 func (m *Merge[T]) OutputChan() <-chan T {
-	return m.fanin.RecvChan()
+	return m.fanin.OutputChan()
 }
 
 // AddInput adds a new input channel to the merge

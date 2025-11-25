@@ -26,7 +26,7 @@ func TestReader(t *testing.T) {
 	}
 	go func() {
 		for {
-			msg, _ := <-reader.RecvChan()
+			msg, _ := <-reader.OutputChan()
 			results[msg.Value] = true
 			res <- msg.Value
 		}

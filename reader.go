@@ -42,8 +42,8 @@ func (r *Reader[R]) DebugInfo() any {
 	}
 }
 
-// RecvChan returns the channel on which messages can be received.
-func (rc *Reader[R]) RecvChan() <-chan Message[R] {
+// OutputChan returns the channel on which messages can be received.
+func (rc *Reader[R]) OutputChan() <-chan Message[R] {
 	return rc.msgChannel
 }
 

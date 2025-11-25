@@ -47,8 +47,8 @@ func (ch *Writer[T]) cleanup() {
 	ch.RunnerBase.cleanup()
 }
 
-// SendChan returns the channel on which messages can be sent to the Writer.
-func (wc *Writer[W]) SendChan() chan<- W {
+// InputChan returns the channel on which messages can be sent to the Writer.
+func (wc *Writer[W]) InputChan() chan<- W {
 	if !wc.IsRunning() {
 		return nil
 	} else {
@@ -93,7 +93,7 @@ func (wc *Writer[W]) start() {
 				break
 			case controlRequest := <-wc.controlChan:
 				// For now only a "kill" can be sent here
-				log.Println("Received kill signal.  Quitting Writer.", controlRequest, wc.SendChan())
+				log.Println("Received kill signal.  Quitting Writer.", controlRequest, wc.InputChan())
 				return
 			}
 		}

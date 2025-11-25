@@ -128,7 +128,7 @@ func _TestFanOut_WithClose(t *testing.T) {
 
 	createWriter := func(writerId int) (out *Writer[int]) {
 		out = NewWriter[int](func(value int) error {
-			log.Println("Writer, Value, Ptr: ", writerId, value, out.SendChan())
+			log.Println("Writer, Value, Ptr: ", writerId, value, out.InputChan())
 			return nil
 		})
 		return
@@ -144,14 +144,14 @@ func _TestFanOut_WithClose(t *testing.T) {
 			writerId += 1
 			writer := createWriter(writerId)
 			writers = append(writers, writer)
-			fanout.Add(writer.SendChan(), nil, false)
+			fanout.Add(writer.InputChan(), nil, false)
 		} else {
 			n := rand.Intn(numWriters)
 			removedWriter := writers[n]
 			writers[n] = writers[numWriters-1]
 			writers = writers[:numWriters-1]
 			// Remove first
-			doneChan := fanout.Remove(removedWriter.SendChan(), true)
+			doneChan := fanout.Remove(removedWriter.InputChan(), true)
 			<-doneChan
 			// And *then* stop the writer
 			removedWriter.Stop()

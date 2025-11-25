@@ -38,7 +38,7 @@ func ExampleFanIn() {
 	// collect the fanned values
 	var vals []int
 	for i := 0; i < NUM_CHANS*NUM_MSGS; i++ {
-		val := <-fanin.RecvChan()
+		val := <-fanin.OutputChan()
 		vals = append(vals, val)
 	}
 
@@ -76,7 +76,7 @@ func TestFanIn(t *testing.T) {
 	go func() {
 		n := 0
 		for fanin.IsRunning() {
-			i := <-fanin.RecvChan()
+			i := <-fanin.OutputChan()
 			vals = append(vals, i)
 			n += 1
 			if n >= 15 {
@@ -130,12 +130,12 @@ func TestMultiReadFanInToFanOut(t *testing.T) {
 		return nil
 	})
 	fanout := NewFanOut[int](nil)
-	fanout.Add(writer.SendChan(), nil, false)
+	fanout.Add(writer.InputChan(), nil, false)
 
 	go func() {
 		for {
 			select {
-			case val := <-fanin.RecvChan():
+			case val := <-fanin.OutputChan():
 				fanout.Send(val)
 				break
 			}
@@ -175,7 +175,7 @@ func TestMultiReadFanInFromReaders(t *testing.T) {
 
 	fanin := NewFanIn[Message[int]](nil)
 	for _, r := range readers {
-		fanin.Add(r.RecvChan())
+		fanin.Add(r.OutputChan())
 	}
 
 	var results []bool
@@ -195,7 +195,7 @@ func TestMultiReadFanInFromReaders(t *testing.T) {
 	go func() {
 		for {
 			select {
-			case val, _ := <-fanin.RecvChan():
+			case val, _ := <-fanin.OutputChan():
 				writer.Send(val.Value)
 				break
 			}

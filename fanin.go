@@ -40,8 +40,8 @@ func NewFanIn[T any](outChan chan T) *FanIn[T] {
 	return out
 }
 
-// RecvChan returns the channel on which merged output can be received.
-func (fi *FanIn[T]) RecvChan() <-chan T {
+// OutputChan returns the channel on which merged output can be received.
+func (fi *FanIn[T]) OutputChan() <-chan T {
 	return fi.outChan
 }
 

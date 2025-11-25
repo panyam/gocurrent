@@ -103,13 +103,13 @@ func NewListReducer[T any](opts ...ReducerOption[[]T, []T, []T]) *Reducer[[]T, [
 	return out
 }
 
-// Gets the channel from which we can read "reduced" values from
-func (fo *Reducer[T, C, U]) RecvChan() <-chan U {
+// OutputChan returns the channel from which we can read "reduced" values from
+func (fo *Reducer[T, C, U]) OutputChan() <-chan U {
 	return fo.outputChan
 }
 
-// SendChan returns the channel onto which messages can be sent (to be reduced).
-func (fo *Reducer[T, C, U]) SendChan() chan<- T {
+// InputChan returns the channel onto which messages can be sent (to be reduced).
+func (fo *Reducer[T, C, U]) InputChan() chan<- T {
 	return fo.inputChan
 }
 

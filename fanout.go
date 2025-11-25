@@ -84,8 +84,8 @@ func (fo *FanOut[T]) Count() int {
 	return len(fo.outputChans)
 }
 
-// Returns the channel on which messages can be sent to this runner to be fanned-out.
-func (fo *FanOut[T]) SendChan() chan<- T {
+// InputChan returns the channel on which messages can be sent to this runner to be fanned-out.
+func (fo *FanOut[T]) InputChan() chan<- T {
 	return fo.inputChan
 }
 

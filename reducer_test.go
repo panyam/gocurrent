@@ -234,7 +234,7 @@ func TestReducerSendChan(t *testing.T) {
 		WithFlushPeriod[int, []int, []int](50*time.Millisecond))
 	defer reducer.Stop()
 
-	sendChan := reducer.SendChan()
+	sendChan := reducer.InputChan()
 
 	go func() {
 		sendChan <- 10

@@ -3,20 +3,6 @@ package gocurrent
 // This file contains adapter methods to make existing components
 // conform to the Component, InputComponent, and OutputComponent interfaces.
 
-// Reader adapters
-
-// OutputChan is an alias for RecvChan to conform to OutputComponent interface
-func (r *Reader[R]) OutputChan() <-chan Message[R] {
-	return r.RecvChan()
-}
-
-// Writer adapters
-
-// InputChan is an alias for SendChan to conform to InputComponent interface
-func (w *Writer[W]) InputChan() chan<- W {
-	return w.SendChan()
-}
-
 // Mapper adapters
 
 // InputChan returns the input channel (exposes the private field for Component interface)
@@ -37,38 +23,10 @@ func (m *Mapper[I, O]) OutputChan() <-chan O {
 
 // Reducer adapters
 
-// InputChan is an alias for SendChan to conform to InputComponent interface
-func (r *Reducer[T, C, U]) InputChan() chan<- T {
-	return r.SendChan()
-}
-
-// OutputChan is an alias for RecvChan to conform to OutputComponent interface
-func (r *Reducer[T, C, U]) OutputChan() <-chan U {
-	return r.RecvChan()
-}
-
 // IsRunning returns true if the reducer is still running
 func (r *Reducer[T, C, U]) IsRunning() bool {
 	// Reducer doesn't have an isRunning flag, check if channels are not nil
 	return r.inputChan != nil
 }
-
-// FanIn adapters
-
-// OutputChan is an alias for RecvChan to conform to OutputComponent interface
-func (fi *FanIn[T]) OutputChan() <-chan T {
-	return fi.RecvChan()
-}
-
-// FanOut adapters
-
-// InputChan returns the input channel for FanOut to conform to InputComponent interface
-func (fo *FanOut[T]) InputChan() chan<- T {
-	return fo.inputChan
-}
-
-// NOTE: FanOut.SendChan() currently returns <-chan T which is incorrect.
-// It should return chan<- T (write-only). This is a bug that should be fixed.
-// For now, we provide the correct InputChan() method above.
 
 // Pipe adapters (Pipe is just a Mapper, so inherits its adapters)

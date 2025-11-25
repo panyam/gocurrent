@@ -51,7 +51,7 @@ func TestReader2Pipe(t *testing.T) {
 		})
 	}
 	reader := makereader(inch)
-	pipe := NewPipe(reader.RecvChan(), outch)
+	pipe := NewPipe(reader.OutputChan(), outch)
 	defer pipe.Stop()
 
 	var results []bool
