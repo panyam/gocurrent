@@ -2,12 +2,28 @@
 
 ## Recent Changes
 
+### Component Standardization - Phase 3: Lifecycle Consistency (Completed)
+- ✅ Added `ClosedChan() <-chan error` to Mapper for completion signaling
+- ✅ Added `ClosedChan() <-chan error` to FanIn for completion signaling
+- ✅ Added `ClosedChan() <-chan error` to FanOut for completion signaling
+- ✅ Added `ClosedChan() <-chan error` to Reducer for completion signaling
+- ✅ Fixed Mapper.OnDone callback (was never being called before)
+- ✅ Fixed FanIn waitgroup management (removed incorrect tracking)
+- ✅ All components now have consistent lifecycle monitoring
+
+### Component Standardization - Phase 2: Method Naming (Completed)
+- ✅ Renamed `RecvChan()` -> `OutputChan()` across all components
+- ✅ Renamed `SendChan()` -> `InputChan()` across all components
+- ✅ Updated all tests and internal references
+- ✅ Consistent, intuitive naming for data flow direction
+
 ### Component Standardization - Phase 1: Channel Direction Fixes (Completed)
 - ✅ Fixed `FanOut.SendChan()` to return `chan<- T` (write-only) instead of `<-chan T`
 - ✅ Fixed `Writer.SendChan()` to return `chan<- W` (write-only) instead of `chan W`
 - ✅ Fixed `FanIn.RecvChan()` to return `<-chan T` (read-only) instead of `chan T`
 - ✅ All tests continue to pass after fixes
 - ✅ Created STANDARDIZATION.md with comprehensive analysis
+- ✅ Created block.go and component_adapters.go for composition framework
 
 ### Custom Flush Triggers for Reducer (Completed)
 - ✅ Repurposed `CollectFunc` bool return value to signal when to flush

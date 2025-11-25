@@ -5,6 +5,7 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"time"
 )
 
 // ReaderFunc is the type of the reader method used by the Reader goroutine primitive.
@@ -56,8 +57,19 @@ func (rc *Reader[R]) start() {
 	rc.RunnerBase.start()
 	go func() {
 		defer rc.cleanup()
+
+		// Channel to signal the inner goroutine to stop
+		stopReading := make(chan struct{})
+
 		go func() {
 			for {
+				// Check if we should stop
+				select {
+				case <-stopReading:
+					return
+				default:
+				}
+
 				newMessage, err := rc.Read()
 				timedOut := false
 				if err != nil {
@@ -67,27 +79,38 @@ func (rc *Reader[R]) start() {
 					}
 					log.Println("Net Error, TimedOut, Closed, errors.Is.ErrClosed: ", nerr, timedOut, errors.Is(err, net.ErrClosed), nil)
 				}
+
+				// Try to send, but respect stop signal
 				if rc.msgChannel != nil && !timedOut && !errors.Is(err, net.ErrClosed) {
-					rc.msgChannel <- Message[R]{
+					select {
+					case <-stopReading:
+						return
+					case rc.msgChannel <- Message[R]{
 						Value: newMessage,
 						Error: err,
+					}:
 					}
 				}
+
 				if err != nil && !timedOut {
 					slog.Debug("Read Error: ", "error", err)
-					rc.closedChan <- err
+					select {
+					case <-stopReading:
+						return
+					case rc.closedChan <- err:
+					}
 					break
 				}
 			}
 		}()
 
 		// and the actual reader
-		for {
-			select {
-			case <-rc.controlChan:
-				// For now only a "kill" can be sent here
-				return
-			}
+		for range <-rc.controlChan {
+			// Signal the reading goroutine to stop
+			close(stopReading)
+			// Wait a bit for it to finish
+			time.Sleep(10 * time.Millisecond)
+			return
 		}
 	}()
 }
