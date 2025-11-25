@@ -14,7 +14,7 @@ type Reducer[T any, C any, U any] struct {
 	FlushPeriod time.Duration
 	// CollectFunc adds an input to the collection and returns the updated collection.
 	// The bool return value indicates whether a flush should be triggered immediately.
-	CollectFunc   func(input T, collection C) (C, bool)
+	CollectFunc   func(collection C, inputs ...T) (C, bool)
 	ReduceFunc    func(collectedItems C) (reducedOutputs U)
 	pendingEvents C
 	selfOwnIn     bool
@@ -122,8 +122,8 @@ func WithOutputChan2[T any, C any](ch chan C) ReducerOption2[T, C] {
 // NewIDReducer2 creates a Reducer2 that simply collects events of type T into a list (of type []T).
 func NewIDReducer[T any](opts ...ReducerOption2[T, []T]) *Reducer2[T, []T] {
 	out := NewReducer2(opts...)
-	out.CollectFunc = func(input T, collection []T) ([]T, bool) {
-		return append(collection, input), false
+	out.CollectFunc = func(collection []T, inputs ...T) ([]T, bool) {
+		return append(collection, inputs...), false
 	}
 	return out
 }
@@ -132,8 +132,11 @@ func NewIDReducer[T any](opts ...ReducerOption2[T, []T]) *Reducer2[T, []T] {
 // This allows producers to send events here in batch mode instead of 1 at a time
 func NewListReducer[T any](opts ...ReducerOption2[[]T, []T]) *Reducer2[[]T, []T] {
 	out := NewReducer2(opts...)
-	out.CollectFunc = func(input []T, collection []T) ([]T, bool) {
-		return append(collection, input...), false
+	out.CollectFunc = func(collection []T, inputs ...[]T) ([]T, bool) {
+		for _, inp := range inputs {
+			collection = append(collection, inp...)
+		}
+		return collection, false
 	}
 	return out
 }
@@ -177,7 +180,7 @@ func (fo *Reducer[T, C, U]) start() {
 			select {
 			case event := <-fo.inputChan:
 				var shouldFlush bool
-				fo.pendingEvents, shouldFlush = fo.CollectFunc(event, fo.pendingEvents)
+				fo.pendingEvents, shouldFlush = fo.CollectFunc(fo.pendingEvents, event)
 				if shouldFlush {
 					fo.Flush()
 				}
