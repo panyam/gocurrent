@@ -41,7 +41,7 @@ func NewFanIn[T any](outChan chan T) *FanIn[T] {
 }
 
 // RecvChan returns the channel on which merged output can be received.
-func (fi *FanIn[T]) RecvChan() chan T {
+func (fi *FanIn[T]) RecvChan() <-chan T {
 	return fi.outChan
 }
 

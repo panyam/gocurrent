@@ -85,7 +85,7 @@ func (fo *FanOut[T]) Count() int {
 }
 
 // Returns the channel on which messages can be sent to this runner to be fanned-out.
-func (fo *FanOut[T]) SendChan() <-chan T {
+func (fo *FanOut[T]) SendChan() chan<- T {
 	return fo.inputChan
 }
 

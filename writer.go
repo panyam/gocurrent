@@ -48,7 +48,7 @@ func (ch *Writer[T]) cleanup() {
 }
 
 // SendChan returns the channel on which messages can be sent to the Writer.
-func (wc *Writer[W]) SendChan() chan W {
+func (wc *Writer[W]) SendChan() chan<- W {
 	if !wc.IsRunning() {
 		return nil
 	} else {
