@@ -6,11 +6,11 @@ test:
 
 # Run tests with race detector (primary verification target)
 test-race:
-	go test -race -count=1 -timeout 30s ./...
+	go test -race -count=5 -timeout 150s ./...
 
 # Run tests with verbose output and race detector
 test-verbose:
-	go test -race -count=1 -timeout 30s -v ./...
+	go test -race -count=5 -timeout 150s -v ./...
 
 # Run go vet
 lint:
