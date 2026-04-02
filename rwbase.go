@@ -3,89 +3,97 @@ package gocurrent
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
-// Base of the Reader and Writer primitives
+// RunnerBase is the base of the Reader, Writer, Mapper, FanIn, and FanOut
+// primitives. It provides lifecycle management (start/stop) and coordination
+// between the owner goroutine and the worker goroutine.
+//
+// Key design: controlChan is created once and never closed or nilled. The done
+// channel is closed by cleanup() to signal that the worker goroutine has exited.
+// This eliminates the data race between Stop() sending on controlChan and
+// cleanup() closing it that existed in the previous mutex+close design.
 type RunnerBase[C any] struct {
-	mu          sync.Mutex
 	controlChan chan C
-	isRunning   bool
+	done        chan struct{}
+	isRunning   atomic.Bool
 	wg          sync.WaitGroup
 	stopVal     C
 }
 
-// Creates a new base runner - called by the Reader and Writer primitives
+// NewRunnerBase creates a new base runner. Called by Reader, Writer, Mapper,
+// FanIn, and FanOut constructors. The controlChan is buffered(1) to allow
+// a single stop signal to be sent without blocking.
 func NewRunnerBase[C any](stopVal C) RunnerBase[C] {
 	return RunnerBase[C]{
 		controlChan: make(chan C, 1),
+		done:        make(chan struct{}),
 		stopVal:     stopVal,
 	}
 }
 
-// Used for returning any debug information.
+// DebugInfo returns diagnostic information about the runner's state.
 func (r *RunnerBase[R]) DebugInfo() any {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	return map[string]any{
-		"ctrlChan":  r.controlChan,
 		"stopVal":   r.stopVal,
-		"isRunning": r.isRunning,
+		"isRunning": r.isRunning.Load(),
 	}
 }
 
-// Returns true if currently running otherwise false
+// IsRunning returns true if the runner's worker goroutine is active.
 func (r *RunnerBase[C]) IsRunning() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.isRunning
+	return r.isRunning.Load()
 }
 
-// Responsible for starting the runner.  This method is intentionally private.  It is to be inherited by child types and then called after their initialization is done.
+// start marks the runner as running and increments the WaitGroup. This method
+// is intentionally private — it is called by composing types after their own
+// initialization is complete.
 func (r *RunnerBase[C]) start() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.isRunning {
+	if !r.isRunning.CompareAndSwap(false, true) {
 		return errors.New("Channel already running")
 	}
-	r.isRunning = true
 	r.wg.Add(1)
 	return nil
 }
 
-// This method is called to stop the runner.  It is upto the child classes
-// to listen to messages on the control channel and initiate the wind-down
-// and cleanup process.
+// Stop sends a stop signal to the worker goroutine and waits for it to finish.
+// It is safe to call Stop() concurrently, multiple times, or after the worker
+// goroutine has already self-terminated. Only the first call that transitions
+// isRunning from true to false will send the stop signal; subsequent calls
+// return immediately.
 func (r *RunnerBase[C]) Stop() error {
-	r.mu.Lock()
-	if !r.isRunning || r.controlChan == nil {
-		// Already stopped or cleaned up — nothing to do
-		r.mu.Unlock()
+	if !r.isRunning.CompareAndSwap(true, false) {
+		// Already stopped (by another Stop() call or by self-termination)
 		return nil
 	}
-	ch := r.controlChan
-	// Mark stopped before releasing the lock so that recursive Stop()
-	// calls (e.g. from cleanup → OnDone → removeAt → Stop) return early.
-	r.isRunning = false
-	r.mu.Unlock()
 
-	// Send the stop signal. If cleanup() closes the channel concurrently
-	// (goroutine self-terminated), recover from the panic on closed channel.
-	func() {
-		defer func() { recover() }()
-		ch <- r.stopVal
-	}()
+	// Either deliver the stop signal, or observe that the goroutine already
+	// exited (done closed). This select eliminates the old race between
+	// sending on controlChan and cleanup() closing it.
+	select {
+	case r.controlChan <- r.stopVal:
+		// Stop signal delivered; goroutine will read it and exit.
+	case <-r.done:
+		// Goroutine already exited on its own (e.g. write error).
+	}
 	r.wg.Wait()
 	return nil
 }
 
-// Cleanup method when the runner stops.  Will be called by the composing types
+// Done returns a channel that is closed when the runner's worker goroutine exits.
+// Useful for coordinating with other goroutines that need to know when the runner
+// has stopped (e.g., FanIn's pipeClosed callback uses this to avoid sending on
+// controlChan after the FanIn goroutine has exited).
+func (r *RunnerBase[C]) Done() <-chan struct{} {
+	return r.done
+}
+
+// cleanup is called by composing types (via defer) when their worker goroutine
+// exits. It signals completion via the done channel and decrements the WaitGroup.
+// controlChan is intentionally NOT closed — it is left for garbage collection.
 func (r *RunnerBase[C]) cleanup() {
-	r.mu.Lock()
-	if r.controlChan != nil {
-		close(r.controlChan)
-		r.controlChan = nil
-	}
-	r.isRunning = false
-	r.mu.Unlock()
+	r.isRunning.Store(false)
+	close(r.done)
 	r.wg.Done()
 }

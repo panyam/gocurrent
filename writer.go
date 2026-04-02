@@ -31,11 +31,12 @@ func WithInputBuffer[W any](size int) WriterOption[W] {
 // configuration via functional options.
 //
 // Examples:
-//   // Simple usage (backwards compatible)
-//   writer := NewWriter(myWriterFunc)
 //
-//   // With buffered input
-//   writer := NewWriter(myWriterFunc, WithInputBuffer[int](100))
+//	// Simple usage (backwards compatible)
+//	writer := NewWriter(myWriterFunc)
+//
+//	// With buffered input
+//	writer := NewWriter(myWriterFunc, WithInputBuffer[int](100))
 func NewWriter[W any](write WriterFunc[W], opts ...WriterOption[W]) *Writer[W] {
 	out := &Writer[W]{
 		RunnerBase: NewRunnerBase("stop"),
@@ -64,29 +65,32 @@ func (ch *Writer[T]) cleanup() {
 	log.Println("Cleaning up writer...")
 	v := ch.msgChannel
 	defer log.Println("Finished cleaning up writer: ", v)
-	close(ch.msgChannel)
-	ch.msgChannel = nil
+	// msgChannel is NOT closed here — blocked Send() calls will see Done()
+	// and return false, avoiding the concurrent close+send race.
 	close(ch.closedChan)
 	ch.RunnerBase.cleanup()
 }
 
 // InputChan returns the channel on which messages can be sent to the Writer.
+// The returned channel is never nil after construction. Callers should prefer
+// Send() for safe access that handles the writer being stopped.
 func (wc *Writer[W]) InputChan() chan<- W {
-	if !wc.IsRunning() {
-		return nil
-	} else {
-		return wc.msgChannel
-	}
+	return wc.msgChannel
 }
 
-// Send sends a message to the Writer. This is a shortcut for sending
-// a message to the underlying channel.
+// Send sends a message to the Writer. Returns true if the message was accepted,
+// false if the writer is stopped. Uses a select on Done() to safely unblock if
+// the writer stops while the send is pending.
 func (wc *Writer[W]) Send(req W) bool {
-	if !wc.IsRunning() || wc.msgChannel == nil {
+	if !wc.IsRunning() {
 		return false
 	}
-	wc.msgChannel <- req
-	return true
+	select {
+	case wc.msgChannel <- req:
+		return true
+	case <-wc.Done():
+		return false
+	}
 }
 
 // ClosedChan returns the channel used to signal when the writer is done
@@ -94,28 +98,21 @@ func (wc *Writer[W]) ClosedChan() <-chan error {
 	return wc.closedChan
 }
 
-// Start writer goroutine
+// start launches the writer goroutine
 func (wc *Writer[W]) start() {
 	wc.RunnerBase.start()
 	go func() {
 		defer wc.cleanup()
-		// ticker := time.NewTicker((wc.WaitTime * 9) / 10)
-		// defer ticker.Stop()
 		for {
 			select {
 			case newRequest := <-wc.msgChannel:
-				// Here we send a request to the server
-				// log.Println("Got a request to write: ", wc.SendChan(), newRequest)
 				err := wc.Write(newRequest)
-				// log.Println("Handled request to write: ", wc.SendChan(), newRequest)
 				if err != nil {
 					log.Println("Write Error: ", err)
 					wc.closedChan <- err
 					return
 				}
-				break
 			case controlRequest := <-wc.controlChan:
-				// For now only a "kill" can be sent here
 				log.Println("Received kill signal.  Quitting Writer.", controlRequest, wc.InputChan())
 				return
 			}

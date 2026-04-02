@@ -56,6 +56,20 @@ func WithOutputChan[T any, C any, U any](ch chan U) ReducerOption[T, C, U] {
 	}
 }
 
+// WithReduceFunc sets the reduce function for the reducer
+func WithReduceFunc[T any, C any, U any](fn func(C) U) ReducerOption[T, C, U] {
+	return func(r *Reducer[T, C, U]) {
+		r.ReduceFunc = fn
+	}
+}
+
+// WithCollectFunc sets the collect function for the reducer
+func WithCollectFunc[T any, C any, U any](fn func(C, ...T) (C, bool)) ReducerOption[T, C, U] {
+	return func(r *Reducer[T, C, U]) {
+		r.CollectFunc = fn
+	}
+}
+
 // NewReducer creates a reducer over generic input and output types. Options can be
 // provided to configure the input channel, output channel, flush period, etc.
 // If channels are not provided via options, the reducer will create and own them.
@@ -98,9 +112,9 @@ type ReducerOption2[T any, C any] = ReducerOption[T, C, C]
 // NewReducer2 creates a 2-parameter reducer where collection type equals output type.
 // This is a simpler API for the common case where no type transformation is needed.
 func NewReducer2[T any, C any](opts ...ReducerOption2[T, C]) *Reducer2[T, C] {
-	out := NewReducer(opts...)
-	out.ReduceFunc = IDFunc[C]
-	return out
+	// Prepend the identity ReduceFunc so it's set before start()
+	allOpts := append([]ReducerOption2[T, C]{WithReduceFunc[T, C, C](IDFunc[C])}, opts...)
+	return NewReducer(allOpts...)
 }
 
 // WithFlushPeriod2 sets the flush period for a Reducer2
@@ -120,24 +134,25 @@ func WithOutputChan2[T any, C any](ch chan C) ReducerOption2[T, C] {
 
 // NewIDReducer2 creates a Reducer2 that simply collects events of type T into a list (of type []T).
 func NewIDReducer[T any](opts ...ReducerOption2[T, []T]) *Reducer2[T, []T] {
-	out := NewReducer2(opts...)
-	out.CollectFunc = func(collection []T, inputs ...T) ([]T, bool) {
+	// Prepend CollectFunc so it's set before start()
+	collectOpt := WithCollectFunc[T, []T, []T](func(collection []T, inputs ...T) ([]T, bool) {
 		return append(collection, inputs...), false
-	}
-	return out
+	})
+	allOpts := append([]ReducerOption2[T, []T]{collectOpt}, opts...)
+	return NewReducer2(allOpts...)
 }
 
 // A reducer that collects a list of items and concats them to a collection
 // This allows producers to send events here in batch mode instead of 1 at a time
 func NewListReducer[T any](opts ...ReducerOption2[[]T, []T]) *Reducer2[[]T, []T] {
-	out := NewReducer2(opts...)
-	out.CollectFunc = func(collection []T, inputs ...[]T) ([]T, bool) {
+	collectOpt := WithCollectFunc[[]T, []T, []T](func(collection []T, inputs ...[]T) ([]T, bool) {
 		for _, inp := range inputs {
 			collection = append(collection, inp...)
 		}
 		return collection, false
-	}
-	return out
+	})
+	allOpts := append([]ReducerOption2[[]T, []T]{collectOpt}, opts...)
+	return NewReducer2(allOpts...)
 }
 
 // OutputChan returns the channel from which we can read "reduced" values from
@@ -170,7 +185,6 @@ func (fo *Reducer[T, C, U]) start() {
 			defer ticker.Stop()
 			if fo.selfOwnIn {
 				close(fo.inputChan)
-				fo.inputChan = nil
 			}
 			close(fo.closedChan)
 			fo.wg.Done()
@@ -181,22 +195,30 @@ func (fo *Reducer[T, C, U]) start() {
 				var shouldFlush bool
 				fo.pendingEvents, shouldFlush = fo.CollectFunc(fo.pendingEvents, event)
 				if shouldFlush {
-					fo.Flush()
+					fo.doFlush()
 				}
 			case <-ticker.C:
-				// Flush
-				fo.Flush()
+				fo.doFlush()
 			case cmd := <-fo.cmdChan:
 				if cmd.Name == "stop" {
 					return
+				} else if cmd.Name == "flush" {
+					fo.doFlush()
 				}
 			}
 		}
 	}()
 }
 
-// Flush immediately processes all pending events and sends the result to the output channel.
+// Flush triggers an immediate flush of pending events by sending a command to
+// the reducer goroutine. This is safe to call from any goroutine.
 func (fo *Reducer[T, C, U]) Flush() {
+	fo.cmdChan <- reducerCmd[U]{Name: "flush"}
+}
+
+// doFlush is the internal flush method called only from the reducer goroutine.
+// It processes all pending events and sends the result to the output channel.
+func (fo *Reducer[T, C, U]) doFlush() {
 	joinedEvents := fo.ReduceFunc(fo.pendingEvents)
 	var zero C
 	fo.pendingEvents = zero

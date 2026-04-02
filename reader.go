@@ -5,7 +5,6 @@ import (
 	"log"
 	"log/slog"
 	"net"
-	"time"
 )
 
 // ReaderFunc is the type of the reader method used by the Reader goroutine primitive.
@@ -44,16 +43,17 @@ func WithOnDone[R any](fn func(*Reader[R])) ReaderOption[R] {
 // configuration via functional options.
 //
 // Examples:
-//   // Simple usage (backwards compatible)
-//   reader := NewReader(myReaderFunc)
 //
-//   // With options
-//   reader := NewReader(myReaderFunc, WithOutputBuffer[int](10))
+//	// Simple usage (backwards compatible)
+//	reader := NewReader(myReaderFunc)
 //
-//   // With multiple options
-//   reader := NewReader(myReaderFunc,
-//       WithOutputBuffer[int](100),
-//       WithOnDone(func(r *Reader[int]) { log.Println("done") }))
+//	// With options
+//	reader := NewReader(myReaderFunc, WithOutputBuffer[int](10))
+//
+//	// With multiple options
+//	reader := NewReader(myReaderFunc,
+//	    WithOutputBuffer[int](100),
+//	    WithOnDone(func(r *Reader[int]) { log.Println("done") }))
 func NewReader[R any](read ReaderFunc[R], opts ...ReaderOption[R]) *Reader[R] {
 	out := &Reader[R]{
 		RunnerBase: NewRunnerBase("stop"),
@@ -83,7 +83,7 @@ func (rc *Reader[R]) OutputChan() <-chan Message[R] {
 	return rc.msgChannel
 }
 
-// The channel used to signal when the reader is done
+// ClosedChan returns the channel used to signal when the reader is done.
 func (rc *Reader[R]) ClosedChan() <-chan error {
 	return rc.closedChan
 }
@@ -97,8 +97,10 @@ func (rc *Reader[R]) start() {
 		stopReading := make(chan struct{})
 
 		go func() {
+			// Recover from any panics (e.g., send on closed closedChan).
+			defer func() { recover() }()
 			for {
-				// Check if we should stop
+				// Check if we should stop before calling Read
 				select {
 				case <-stopReading:
 					return
@@ -116,7 +118,7 @@ func (rc *Reader[R]) start() {
 				}
 
 				// Try to send, but respect stop signal
-				if rc.msgChannel != nil && !timedOut && !errors.Is(err, net.ErrClosed) {
+				if !timedOut && !errors.Is(err, net.ErrClosed) {
 					select {
 					case <-stopReading:
 						return
@@ -139,14 +141,12 @@ func (rc *Reader[R]) start() {
 			}
 		}()
 
-		// and the actual reader
-		for range <-rc.controlChan {
-			// Signal the reading goroutine to stop
-			close(stopReading)
-			// Wait a bit for it to finish
-			time.Sleep(10 * time.Millisecond)
-			return
-		}
+		// Wait for control signal to stop
+		<-rc.controlChan
+		// Signal the reading goroutine to stop. It will exit when Read()
+		// returns and it sees stopReading closed. We don't wait for it
+		// because Read() may block indefinitely (e.g., network read).
+		close(stopReading)
 	}()
 }
 
@@ -155,9 +155,9 @@ func (r *Reader[T]) cleanup() {
 	if r.OnDone != nil {
 		r.OnDone(r)
 	}
-	oldCh := r.msgChannel
-	r.msgChannel = nil
-	close(oldCh)
+	// msgChannel is NOT closed here to avoid racing with the inner goroutine
+	// which may still be sending to it (Read() can block indefinitely).
+	// Consumers should use ClosedChan() or Done() to detect completion.
 	close(r.closedChan)
 	r.RunnerBase.cleanup()
 }

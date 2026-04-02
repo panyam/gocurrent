@@ -183,16 +183,12 @@ func (fo *FanOut[T]) cleanup() {
 	if fo.selfOwnIn {
 		close(fo.inputChan)
 	}
-	fo.inputChan = nil
 	// close any output channels *we* own
 	for index, ch := range fo.outputChans {
 		if fo.outputSelfOwned[index] && ch != nil {
 			close(ch)
 		}
 	}
-	fo.outputChans = nil
-	fo.outputFilters = nil
-	fo.outputSelfOwned = nil
 	close(fo.closedChan)
 	fo.RunnerBase.cleanup()
 }

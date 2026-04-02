@@ -105,23 +105,19 @@ func TestFanIn(t *testing.T) {
 
 func TestMultiReadFanInToFanOut(t *testing.T) {
 	log.Println("===================== TestMultiReadFanInToFanOut =====================")
-	inch := []chan int{
-		make(chan int),
-		make(chan int),
-		make(chan int),
-		make(chan int),
-		make(chan int),
-	}
-	outch := make(chan int)
-	fanin := NewFanIn(WithFanInOutputChan(outch))
 
-	for ch := 0; ch < 5; ch++ {
-		fanin.Add(inch[ch])
+	// FanIn: merge 5 channels
+	fanin := NewFanIn[int](WithFanInOutputBuffer[int](5))
+	inch := make([]chan int, 5)
+	for i := range inch {
+		inch[i] = make(chan int, 1)
+		fanin.Add(inch[i])
 	}
 
+	// FanOut: broadcast to a writer
 	var results []int
 	var m sync.Mutex
-	resch := make(chan int)
+	resch := make(chan int, 5)
 	writer := NewWriter(func(val int) error {
 		m.Lock()
 		results = append(results, val)
@@ -129,32 +125,38 @@ func TestMultiReadFanInToFanOut(t *testing.T) {
 		resch <- val
 		return nil
 	})
-	fanout := NewFanOut[int]()
-	fanout.Add(writer.InputChan(), nil, false)
+	fanout := NewFanOut[int](WithFanOutInputBuffer[int](5), WithFanOutSendSync[int](true))
+	<-fanout.Add(writer.InputChan(), nil, true)
 
+	// Pump goroutine: FanIn → FanOut
+	done := make(chan struct{})
 	go func() {
 		for {
 			select {
+			case <-done:
+				return
 			case val := <-fanin.OutputChan():
 				fanout.Send(val)
-				break
 			}
 		}
 	}()
 
-	// log.Println("Sending 5 values")
+	// Send 5 values (buffered channels so these don't block)
 	for i := 0; i < 5; i++ {
 		inch[i] <- i
 	}
-	// log.Println("Waiting 5 values")
+	// Collect all 5 results
 	for i := 0; i < 5; i++ {
 		<-resch
 	}
 
-	// log.Println("Results: ", results)
-	assert.Equal(t, len(results), 5)
+	m.Lock()
+	assert.Equal(t, 5, len(results))
+	m.Unlock()
+	close(done)
 	fanin.Stop()
 	fanout.Stop()
+	writer.Stop()
 }
 
 func TestMultiReadFanInFromReaders(t *testing.T) {
@@ -192,12 +194,17 @@ func TestMultiReadFanInFromReaders(t *testing.T) {
 		return nil
 	})
 
+	done := make(chan struct{})
 	go func() {
 		for {
 			select {
-			case val, _ := <-fanin.OutputChan():
+			case <-done:
+				return
+			case val, ok := <-fanin.OutputChan():
+				if !ok {
+					return
+				}
 				writer.Send(val.Value)
-				break
 			}
 		}
 	}()
@@ -214,6 +221,7 @@ func TestMultiReadFanInFromReaders(t *testing.T) {
 	for i := 0; i < NUM_CHANS; i++ {
 		assert.Equal(t, true, results[i])
 	}
+	close(done)
 	fanin.Stop()
 	writer.Stop()
 }

@@ -21,6 +21,7 @@ type FanIn[T any] struct {
 	selfOwnOut bool
 	outChan    chan T
 	closedChan chan error
+	stopping   chan struct{} // closed at start of cleanup to unblock pipeClosed
 }
 
 // FanInOption is a functional option for configuring a FanIn
@@ -54,20 +55,22 @@ func WithFanInOnChannelRemoved[T any](fn func(*FanIn[T], <-chan T)) FanInOption[
 // The FanIn starts running immediately upon creation.
 //
 // Examples:
-//   // Simple usage with owned channel (backwards compatible)
-//   fanin := NewFanIn[int]()
 //
-//   // With existing channel (backwards compatible)
-//   outChan := make(chan int, 10)
-//   fanin := NewFanIn(WithFanInOutputChan(outChan))
+//	// Simple usage with owned channel (backwards compatible)
+//	fanin := NewFanIn[int]()
 //
-//   // With buffered output
-//   fanin := NewFanIn[int](WithFanInOutputBuffer[int](100))
+//	// With existing channel (backwards compatible)
+//	outChan := make(chan int, 10)
+//	fanin := NewFanIn(WithFanInOutputChan(outChan))
+//
+//	// With buffered output
+//	fanin := NewFanIn[int](WithFanInOutputBuffer[int](100))
 func NewFanIn[T any](opts ...FanInOption[T]) *FanIn[T] {
 	out := &FanIn[T]{
 		RunnerBase: NewRunnerBase(fanInCmd[T]{Name: "stop"}),
 		selfOwnOut: true,
 		closedChan: make(chan error, 1),
+		stopping:   make(chan struct{}),
 	}
 
 	// Apply options
@@ -118,14 +121,16 @@ func (fi *FanIn[T]) Count() int {
 }
 
 func (fi *FanIn[T]) cleanup() {
+	// Signal stopping FIRST so pipeClosed callbacks can return immediately
+	// instead of blocking on controlChan. This breaks the deadlock cycle:
+	// cleanup → pipe.Stop() → pipe.cleanup → pipeClosed → controlChan send.
+	close(fi.stopping)
 	for _, input := range fi.inputs {
 		input.Stop()
 	}
-	fi.inputs = nil
 	if fi.selfOwnOut {
 		close(fi.outChan)
 	}
-	fi.outChan = nil
 	close(fi.closedChan)
 	fi.RunnerBase.cleanup()
 }
@@ -139,13 +144,18 @@ func (fi *FanIn[T]) start() {
 			if cmd.Name == "stop" {
 				return
 			} else if cmd.Name == "add" {
-				// Add a new reader to our list
-				input := NewPipe(cmd.AddedChannel, fi.outChan)
+				// Set OnDone at construction time via option to avoid racing
+				// with the Mapper goroutine (which starts immediately).
+				input := NewMapper(cmd.AddedChannel, fi.outChan, idMapperFunc[T],
+					WithMapperOnDone[T, T](func(m *Mapper[T, T]) { fi.pipeClosed(m) }))
 				fi.inputs = append(fi.inputs, input)
-				input.OnDone = fi.pipeClosed
 			} else if cmd.Name == "remove" {
 				// Remove an existing reader from our list
 				log.Println("Removing channel: ", cmd.RemovedChannel)
+				fi.remove(cmd.RemovedChannel)
+			} else if cmd.Name == "pipe_closed" {
+				// A pipe self-terminated (its input channel was closed).
+				// Remove it from our inputs list.
 				fi.remove(cmd.RemovedChannel)
 			}
 		}
@@ -162,12 +172,17 @@ func (fi *FanIn[T]) removeAt(index int) {
 	}
 }
 
+// pipeClosed is the OnDone callback for internal Mapper (pipe) goroutines.
+// It routes the notification through the FanIn's control channel to ensure
+// fi.inputs is only modified by the FanIn goroutine, avoiding data races.
+// Uses the stopping channel to avoid deadlock when FanIn is shutting down.
 func (fi *FanIn[T]) pipeClosed(p *Mapper[T, T]) {
-	for index, input := range fi.inputs {
-		if input == p {
-			fi.removeAt(index)
-			break
-		}
+	select {
+	case fi.controlChan <- fanInCmd[T]{Name: "pipe_closed", RemovedChannel: p.input}:
+	case <-fi.stopping:
+		// FanIn is shutting down, cleanup will handle everything
+	case <-fi.Done():
+		// FanIn already stopped
 	}
 }
 

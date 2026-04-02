@@ -23,7 +23,7 @@ reader := gocurrent.NewReader(func() (int, error) {
 defer reader.Stop()
 
 // Read from the channel
-for msg := range reader.RecvChan() {
+for msg := range reader.OutputChan() {
     if msg.Error != nil {
         log.Printf("Error: %v", msg.Error)
         continue
@@ -59,7 +59,7 @@ go func() {
 }()
 
 // Process messages
-for msg := range reader.RecvChan() {
+for msg := range reader.OutputChan() {
     if msg.Error != nil {
         log.Printf("Read error: %v", msg.Error)
         break
@@ -241,7 +241,7 @@ chan3 <- 3
 
 // Read merged output
 for i := 0; i < 3; i++ {
-    result := <-fanIn.RecvChan()
+    result := <-fanIn.OutputChan()
     fmt.Printf("Received: %d\n", result)
 }
 ```

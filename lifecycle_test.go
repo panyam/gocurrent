@@ -167,19 +167,23 @@ func TestStandardizedNaming(t *testing.T) {
 
 	// Test Writer.InputChan()
 	t.Run("Writer.InputChan", func(t *testing.T) {
-		received := 0
+		done := make(chan int, 1)
 		writer := NewWriter(func(val int) error {
-			received = val
+			done <- val
 			return nil
 		})
 		defer writer.Stop()
 
 		// Send via InputChan
 		writer.InputChan() <- 42
-		time.Sleep(50 * time.Millisecond)
 
-		if received != 42 {
-			t.Errorf("Expected 42, got %d", received)
+		select {
+		case received := <-done:
+			if received != 42 {
+				t.Errorf("Expected 42, got %d", received)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Timeout waiting for writer to process value")
 		}
 	})
 

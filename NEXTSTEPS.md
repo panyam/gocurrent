@@ -2,6 +2,25 @@
 
 ## Recent Changes
 
+### Race Condition Fixes (Completed — Issue #2)
+- ✅ Replaced `sync.Mutex` + `bool` with `sync/atomic.Bool` for `RunnerBase.isRunning`
+- ✅ Added `done chan struct{}` to RunnerBase for safe Stop/cleanup coordination
+- ✅ Eliminated concurrent send+close race on `controlChan` (controlChan is never closed now)
+- ✅ Fixed Writer `Send()` TOCTOU race using `select` on `Done()` channel
+- ✅ Fixed Reader cleanup race — msgChannel no longer closed from cleanup (avoids race with inner goroutine)
+- ✅ Fixed FanIn `pipeClosed` callback race — now routes through controlChan instead of direct slice access
+- ✅ Fixed FanIn `OnDone` assignment race — set at Mapper construction time via `WithMapperOnDone` option
+- ✅ Fixed Reducer `Flush()` race — now routes through command channel to goroutine
+- ✅ Fixed Reducer `ReduceFunc`/`CollectFunc` assignment race — set via options before `start()`
+- ✅ Added `WithReduceFunc`, `WithCollectFunc` functional options for Reducer
+- ✅ Added `Done() <-chan struct{}` method to RunnerBase for cross-goroutine coordination
+- ✅ Removed all channel nilling in cleanup paths (was source of races)
+- ✅ Added race-specific test suite (5 new tests)
+- ✅ Added Makefile with `test-race` target
+- ✅ Added GitHub Actions CI with race detection
+- ✅ Added pre-push git hook running race-detected tests
+- ✅ All tests pass with `go test -race`
+
 ### Reducer API Simplification (Completed)
 - ✅ Added `Reducer2[T, C]` type alias for simplified 2-parameter API (where U == C)
 - ✅ Added `NewReducer2()` constructor and helper functions
@@ -69,8 +88,8 @@
 
 ### Testing
 - [ ] Add benchmarks for all components
-- [ ] Add concurrency stress tests
-- [ ] Test resource cleanup under error conditions
+- [x] Add concurrency stress tests (race condition tests added)
+- [x] Test resource cleanup under error conditions (covered by race tests)
 
 ### Features
 - [ ] Consider adding metrics/observability hooks
