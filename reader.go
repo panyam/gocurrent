@@ -155,9 +155,13 @@ func (r *Reader[T]) cleanup() {
 	if r.OnDone != nil {
 		r.OnDone(r)
 	}
-	// msgChannel is NOT closed here to avoid racing with the inner goroutine
-	// which may still be sending to it (Read() can block indefinitely).
-	// Consumers should use ClosedChan() or Done() to detect completion.
-	close(r.closedChan)
+	// Signal completion via closedChan. We send nil (normal stop) instead of
+	// closing the channel to avoid racing with the inner goroutine which may
+	// still be sending an error to closedChan. If the inner goroutine already
+	// sent an error, the buffer is full and we skip via default.
+	select {
+	case r.closedChan <- nil:
+	default:
+	}
 	r.RunnerBase.cleanup()
 }
