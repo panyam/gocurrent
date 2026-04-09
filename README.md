@@ -278,31 +278,29 @@ case msg := <-out2:
 }
 ```
 
-### Map
+### SyncMap
 
-A thread-safe map with read/write locking capabilities.
+A type-safe generic wrapper around `sync.Map`, providing the same concurrent map
+semantics optimized for read-heavy workloads but with compile-time type safety.
 
 ```go
-// Create a thread-safe map
-safeMap := gocurrent.NewMap[string, int]()
+// Usable without initialization (zero value is ready to use)
+var m gocurrent.SyncMap[string, int]
 
-// Basic operations
-safeMap.Set("key1", 42)
-value, exists := safeMap.Get("key1")
-if exists {
+// Basic operations — same API as sync.Map, just typed
+m.Store("key1", 42)
+value, ok := m.Load("key1")
+if ok {
     fmt.Printf("Value: %d\n", value)
 }
 
-// Transaction-style operations
-safeMap.Update(func(m map[string]int) {
-    m["key2"] = 100
-    m["key3"] = 200
-})
+// Atomic load-and-delete
+prev, loaded := m.LoadAndDelete("key1")
 
-safeMap.View(func() {
-    val1, _ := safeMap.LGet("key1", false) // No lock needed in View
-    val2, _ := safeMap.LGet("key2", false)
-    fmt.Printf("Sum: %d\n", val1 + val2)
+// Iterate all entries
+m.Range(func(k string, v int) bool {
+    fmt.Printf("%s = %d\n", k, v)
+    return true // return false to stop
 })
 ```
 
