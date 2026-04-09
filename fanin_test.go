@@ -125,7 +125,7 @@ func TestMultiReadFanInToFanOut(t *testing.T) {
 		resch <- val
 		return nil
 	})
-	fanout := NewFanOut[int](WithFanOutInputBuffer[int](5), WithFanOutSendSync[int](true))
+	fanout := NewSyncFanOut[int](WithFanOutInputBuffer[int](5))
 	<-fanout.Add(writer.InputChan(), nil, true)
 
 	// Pump goroutine: FanIn → FanOut

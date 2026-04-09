@@ -79,9 +79,9 @@ func TestFanInClosedChan(t *testing.T) {
 	}
 }
 
-// TestFanOutClosedChan verifies that FanOut signals completion via ClosedChan
+// TestFanOutClosedChan verifies that QueuedFanOut signals completion via ClosedChan
 func TestFanOutClosedChan(t *testing.T) {
-	fanout := NewFanOut[int]()
+	fanout := NewQueuedFanOut[int]()
 
 	// Add some outputs
 	out1 := fanout.New(nil)
@@ -107,7 +107,7 @@ func TestFanOutClosedChan(t *testing.T) {
 			t.Errorf("Expected nil error, got: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("Timeout waiting for FanOut to close")
+		t.Fatal("Timeout waiting for QueuedFanOut to close")
 	}
 }
 
@@ -221,9 +221,9 @@ func TestStandardizedNaming(t *testing.T) {
 		}
 	})
 
-	// Test FanOut.InputChan()
-	t.Run("FanOut.InputChan", func(t *testing.T) {
-		fanout := NewFanOut[int]()
+	// Test QueuedFanOut.InputChan()
+	t.Run("QueuedFanOut.InputChan", func(t *testing.T) {
+		fanout := NewQueuedFanOut[int]()
 		defer fanout.Stop()
 
 		out := fanout.New(nil)

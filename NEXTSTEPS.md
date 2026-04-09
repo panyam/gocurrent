@@ -2,6 +2,27 @@
 
 ## Recent Changes
 
+### FanOut Dispatch Model Refactor (Completed — Issue #1)
+- ✅ Split `FanOut[T]` into three separate implementations with different dispatch strategies
+- ✅ Defined `FanOuter[T]` interface for polymorphic usage across all fan-out types
+- ✅ Extracted `fanOutCore[T]` shared base with common state, methods, and control command handling
+- ✅ Implemented `SyncFanOut[T]` — blocking sender, strict FIFO, zero extra goroutines
+- ✅ Implemented `AsyncFanOut[T]` — non-blocking sender, no ordering, goroutine per output
+- ✅ Implemented `QueuedFanOut[T]` — non-blocking sender, strict FIFO via dispatch goroutine
+- ✅ QueuedFanOut: immutable `outputSnapshot` rebuilt on Add/Remove (zero per-event allocations)
+- ✅ QueuedFanOut: concurrent "removed set" so dispatch goroutine skips removed outputs in old snapshots
+- ✅ QueuedFanOut: `stopDispatch` channel to interrupt blocked sends during Stop
+- ✅ QueuedFanOut: runner processes controlChan during dispatchChan backpressure (via `enqueue()`)
+- ✅ QueuedFanOut: configurable queue size via `WithQueueSize` option (default 64)
+- ✅ QueuedFanOut: enhanced `DebugInfo()` with queue depth and snapshot info
+- ✅ Fixed `New()` to correctly mark channels as self-owned (pre-existing bug)
+- ✅ Updated `Broadcast` in block.go to use `QueuedFanOut`
+- ✅ Removed old `FanOut[T]` type, `NewFanOut()`, `SendSync` flag, `WithFanOutSendSync`
+- ✅ Comprehensive test suite: FIFO ordering, non-blocking sender, backpressure, bounded goroutines, snapshot consistency, filters, lifecycle
+- ✅ Separate test files per fan-out type
+- ✅ All tests pass with `-race -count=5`
+- ✅ Updated README with migration guide and dispatch strategy comparison table
+
 ### Race Condition Fixes (Completed — Issue #2)
 - ✅ Replaced `sync.Mutex` + `bool` with `sync/atomic.Bool` for `RunnerBase.isRunning`
 - ✅ Added `done chan struct{}` to RunnerBase for safe Stop/cleanup coordination

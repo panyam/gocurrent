@@ -248,35 +248,44 @@ for i := 0; i < 3; i++ {
 
 ### FanOut
 
-Distribute messages from one channel to multiple output channels.
+Distribute messages from one channel to multiple output channels. Three dispatch strategies are available, each implementing the `FanOuter[T]` interface:
+
+| Type | Sender blocks? | FIFO ordering? | Goroutines |
+|---|---|---|---|
+| `QueuedFanOut` (recommended) | No (until queue full) | Strict | 2 total (bounded) |
+| `SyncFanOut` | Yes (all outputs) | Strict | 0 extra |
+| `AsyncFanOut` | No | None | N per event |
 
 ```go
-// Create fan-out
-fanOut := gocurrent.NewFanOut[string](nil)
-defer fanOut.Stop()
+// QueuedFanOut (recommended) — non-blocking sender, strict FIFO
+fo := gocurrent.NewQueuedFanOut[string]()
+defer fo.Stop()
 
-// Add output channels
-out1 := fanOut.New(nil) // No filter
-out2 := fanOut.New(func(s *string) *string {
-    // Filter: only pass strings longer than 5 chars
-    if len(*s) > 5 {
-        return s
-    }
+out1 := fo.New(nil) // No filter
+out2 := fo.New(func(s *string) *string {
+    if len(*s) > 5 { return s }
     return nil
 })
 
-// Send data
-fanOut.Send("hello")    // Goes to out1 only
-fanOut.Send("hello world") // Goes to both out1 and out2
+fo.Send("hello")       // Goes to out1 only (filtered from out2)
+fo.Send("hello world") // Goes to both out1 and out2
 
-// Read from outputs
-select {
-case msg := <-out1:
-    fmt.Printf("Out1: %s\n", msg)
-case msg := <-out2:
-    fmt.Printf("Out2: %s\n", msg)
-}
+// SyncFanOut — sender blocks until all outputs receive each event
+syncFo := gocurrent.NewSyncFanOut[int]()
+
+// AsyncFanOut — fire-and-forget, no ordering guarantee
+asyncFo := gocurrent.NewAsyncFanOut[int]()
 ```
+
+#### Migration from `FanOut[T]`
+
+The old `FanOut[T]` type and `NewFanOut()` constructor have been removed. Replace with the explicit type that matches your use case:
+
+| Old code | New code |
+|---|---|
+| `NewFanOut[T]()` (default async) | `NewQueuedFanOut[T]()` |
+| `NewFanOut[T](WithFanOutSendSync[T](true))` | `NewSyncFanOut[T]()` |
+| `*FanOut[T]` type | `FanOuter[T]` interface or concrete type |
 
 ### SyncMap
 

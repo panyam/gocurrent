@@ -151,15 +151,16 @@ func (p *Pipeline[T]) Send(value T) {
 	p.input <- value
 }
 
-// Example: Broadcast pattern - one input, multiple outputs
+// Example: Broadcast pattern - one input, multiple outputs.
+// Uses QueuedFanOut for strict FIFO ordering with non-blocking sends.
 type Broadcast[T any] struct {
 	*Block
-	fanout *FanOut[T]
+	fanout *QueuedFanOut[T]
 }
 
-// NewBroadcast creates a broadcast block using FanOut
+// NewBroadcast creates a broadcast block using QueuedFanOut
 func NewBroadcast[T any](name string) *Broadcast[T] {
-	fanout := NewFanOut[T]()
+	fanout := NewQueuedFanOut[T]()
 	block := NewBlock(name)
 	block.Add(fanout)
 
@@ -171,7 +172,7 @@ func NewBroadcast[T any](name string) *Broadcast[T] {
 
 // InputChan implements InputComponent
 func (b *Broadcast[T]) InputChan() chan<- T {
-	return b.fanout.inputChan
+	return b.fanout.InputChan()
 }
 
 // Send implements InputComponent

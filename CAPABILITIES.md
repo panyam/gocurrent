@@ -1,13 +1,13 @@
 # gocurrent
 
 ## Version
-0.0.12
+0.0.13
 
 ## Provides
 - concurrency-patterns: Rob Pike concurrency pattern implementations
 - reader-writer: Reader/Writer goroutines for continuous data acquisition and serialized writes
 - mapper-reducer: Mapper for data transformation, Reducer for batching with time windows
-- fan-in-fan-out: FanIn/FanOut for channel multiplexing/demultiplexing
+- fan-in-fan-out: FanIn for channel merging; FanOut with 3 dispatch strategies (SyncFanOut, AsyncFanOut, QueuedFanOut) via FanOuter interface
 - thread-safe-map: Atomic map operations
 
 ## Module

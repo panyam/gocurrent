@@ -11,8 +11,11 @@
 //   - Reducer: Collect and reduce N values from an input channel with configurable time windows
 //   - Pipe: Connect a reader and writer channel with identity transform
 //   - FanIn: Merge multiple input channels into a single output channel
-//   - FanOut: Distribute messages from one channel to multiple output channels
-//   - Map: A thread-safe map with read/write locking capabilities
+//   - FanOut: Distribute messages from one channel to multiple output channels.
+//     Three dispatch strategies available via [SyncFanOut], [AsyncFanOut], and
+//     [QueuedFanOut] (recommended), each with different ordering/blocking trade-offs.
+//     See the [FanOuter] interface for the common API.
+//   - SyncMap: A type-safe generic wrapper around sync.Map
 //
 // All concurrency primitives are designed to be composable and provide
 // fine-grained control over goroutine lifecycles, resource management, and

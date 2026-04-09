@@ -243,9 +243,10 @@ NewWriter[int](WithInputChan(inputChan))
 9. Standardize command patterns
 
 ### Phase 4: Constructor Modernization
-10. Migrate all constructors to functional options
-11. Make channel ownership configurable via options
-12. Add buffer size options
+10. ✅ FanOut: Migrated to functional options with 3 dispatch types (SyncFanOut, AsyncFanOut, QueuedFanOut)
+11. ✅ FanOut: Channel ownership configurable via WithFanOutInputChan / WithFanOutInputBuffer
+12. ✅ FanOut: Buffer size options (WithQueueSize for QueuedFanOut)
+- [ ] Migrate remaining constructors (Reader, Writer, Mapper, FanIn) to functional options
 
 ### Phase 5: Documentation & Examples
 13. Update README with new patterns

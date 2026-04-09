@@ -4,10 +4,67 @@ import (
 	"log"
 )
 
-// FanOuts lets a message to be fanned-out to multiple channels.
-// Optionally the message can also be transformed (or filtered)
-// before fanning out to the listeners.
+// FilterFunc is an optional per-output transformation/filtering function.
+// It receives a pointer to the event and returns a pointer to the (possibly
+// modified) event. Return nil to skip delivery to this output.
 type FilterFunc[T any] func(*T) *T
+
+// FanOuter is the interface satisfied by all fan-out dispatch strategies.
+//
+// Three concrete implementations are provided, each with different trade-offs
+// between sender blocking, event ordering, and goroutine usage:
+//
+//   - [SyncFanOut]:   Sender blocks until all outputs receive the event.
+//     Strict FIFO ordering. Zero extra goroutines.
+//   - [AsyncFanOut]:  Sender never blocks (one goroutine per output per event).
+//     No ordering guarantee. Goroutine count can explode.
+//   - [QueuedFanOut]: Sender blocks only when the dispatch queue is full.
+//     Strict FIFO ordering via a persistent dispatch goroutine.
+//     Two goroutines total (runner + dispatcher). Recommended default.
+//
+// Ordering semantics summary:
+//
+//	| Type           | Sender blocks?        | FIFO ordering? | Goroutines        |
+//	|----------------|-----------------------|----------------|-------------------|
+//	| SyncFanOut     | Yes (all outputs)     | Strict         | 0 extra           |
+//	| AsyncFanOut    | No                    | None           | N per event       |
+//	| QueuedFanOut   | No (until queue full) | Strict         | 2 total (bounded) |
+type FanOuter[T any] interface {
+	Component
+
+	// Send delivers a value to the fan-out for distribution to all outputs.
+	// Blocking behavior depends on the concrete implementation.
+	Send(value T)
+
+	// InputChan returns the write-only input channel. Callers may send
+	// directly on this channel instead of calling Send.
+	InputChan() chan<- T
+
+	// Add registers an existing output channel with an optional per-channel
+	// filter. If wait is true, the returned channel receives nil once the
+	// registration is complete; otherwise the returned channel is nil.
+	Add(output chan<- T, filter FilterFunc[T], wait bool) (callbackChan chan error)
+
+	// New creates a new output channel owned by the fan-out (closed on Stop)
+	// with an optional filter. The call blocks until registration is complete.
+	New(filter FilterFunc[T]) chan T
+
+	// Remove unregisters an output channel. If the channel was created by New,
+	// it is also closed. If wait is true, the returned channel receives nil
+	// once the removal is complete.
+	Remove(output chan<- T, wait bool) (callbackChan chan error)
+
+	// Count returns the current number of registered output channels.
+	Count() int
+
+	// ClosedChan returns a channel that receives nil (or an error) when the
+	// fan-out has fully shut down.
+	ClosedChan() <-chan error
+}
+
+// ---------------------------------------------------------------------------
+// Internal command type used by all fan-out implementations
+// ---------------------------------------------------------------------------
 
 type fanOutCmd[T any] struct {
 	Name           string
@@ -18,14 +75,13 @@ type fanOutCmd[T any] struct {
 	CallbackChan   chan error
 }
 
-// FanOut takes a message from one chanel, applies a mapper function
-// and fans it out to N output channels.
-//
-// The general pattern is to:
-//  1. Create a FanOut[T] with the NewFanOut method
-//  2. Start a reader goroutine that reads values from fanout channels (note this SHOULD be started by any values are sent on the input channel)
-//  3. Start sending values through the input channel via the Send method.
-type FanOut[T any] struct {
+// ---------------------------------------------------------------------------
+// fanOutCore — shared state and methods embedded by all implementations
+// ---------------------------------------------------------------------------
+
+// fanOutCore contains the state and methods common to every fan-out strategy.
+// It is unexported; callers interact through [FanOuter] or the concrete types.
+type fanOutCore[T any] struct {
 	RunnerBase[fanOutCmd[T]]
 	selfOwnIn       bool
 	inputChan       chan T
@@ -33,255 +89,172 @@ type FanOut[T any] struct {
 	outputSelfOwned []bool
 	outputFilters   []FilterFunc[T]
 	closedChan      chan error
-
-	// In the default mode, the Send method simply writes to an input channel that is read
-	// by the runner loop of this FanOut.  As soon as an event is read, it by default sequentially
-	// writes to all output channels.  If the output channels are not being drained by the reader
-	// goroutine (in 2 above) then the Send method will block.
-	// In other words, if the reader goroutine is NOT running before the Send method is invoked
-	// OR if the reader goroutine is blocked for some reason, then the Send method will block.
-	// To prevent this set the async flag to true in the Send method to true so that writes to
-	// the reader goroutines are themselves asynchronous and non blocking.
-	//
-	// By setting this flag to true, writes to th output channels will happen synchronously without
-	// invoking a new goroutine.  This will help reduce number of goroutines kicked off during dispatch
-	// and is is an optimization if callers/owners of this FanOut want to exercise fine control over the
-	// reader channels and goroutines.  For example the caller might create buffered output channels so
-	// writes are blocked, or the caller themselves may be running the readers in seperate goroutines
-	// to prevent any blocking behavior.
-	SendSync bool
 }
 
-// FanOutOption is a functional option for configuring a FanOut
-type FanOutOption[T any] func(*FanOut[T])
-
-// WithFanOutInputChan sets the input channel for the FanOut
-func WithFanOutInputChan[T any](ch chan T) FanOutOption[T] {
-	return func(fo *FanOut[T]) {
-		fo.inputChan = ch
-		fo.selfOwnIn = false
+// initCore sets up the shared state. Called by each concrete constructor.
+func (c *fanOutCore[T]) initCore() {
+	c.RunnerBase = NewRunnerBase(fanOutCmd[T]{Name: "stop"})
+	c.closedChan = make(chan error, 1)
+	if c.inputChan == nil {
+		c.inputChan = make(chan T)
+		c.selfOwnIn = true
 	}
 }
 
-// WithFanOutInputBuffer creates a buffered input channel for the FanOut
-func WithFanOutInputBuffer[T any](size int) FanOutOption[T] {
-	return func(fo *FanOut[T]) {
-		fo.inputChan = make(chan T, size)
-		fo.selfOwnIn = true
-	}
+// ClosedChan returns the channel used to signal when the fan-out is done.
+func (c *fanOutCore[T]) ClosedChan() <-chan error {
+	return c.closedChan
 }
 
-// WithFanOutSendSync sets whether sends to output channels should be synchronous
-func WithFanOutSendSync[T any](sync bool) FanOutOption[T] {
-	return func(fo *FanOut[T]) {
-		fo.SendSync = sync
-	}
-}
-
-// NewFanOut creates a new FanOut that fans messages to multiple output channels with functional options.
-// By default, creates and owns an unbuffered input channel. Use options to customize.
-// The FanOut starts running immediately upon creation.
-//
-// Examples:
-//   // Simple usage with owned channel (backwards compatible)
-//   fanout := NewFanOut[int]()
-//
-//   // With existing channel (backwards compatible)
-//   inChan := make(chan int, 10)
-//   fanout := NewFanOut(WithFanOutInputChan(inChan))
-//
-//   // With buffered input
-//   fanout := NewFanOut[int](WithFanOutInputBuffer[int](100))
-//
-//   // With synchronous sends
-//   fanout := NewFanOut[int](WithFanOutSendSync[int](true))
-func NewFanOut[T any](opts ...FanOutOption[T]) *FanOut[T] {
-	out := &FanOut[T]{
-		RunnerBase: NewRunnerBase(fanOutCmd[T]{Name: "stop"}),
-		selfOwnIn:  true,
-		closedChan: make(chan error, 1),
-	}
-
-	// Apply options
-	for _, opt := range opts {
-		opt(out)
-	}
-
-	// Create default channel if not provided
-	if out.inputChan == nil {
-		out.inputChan = make(chan T)
-	}
-
-	out.start()
-	return out
-}
-
-// ClosedChan returns the channel used to signal when the fan-out is done
-func (fo *FanOut[T]) ClosedChan() <-chan error {
-	return fo.closedChan
-}
-
-func (fo *FanOut[T]) DebugInfo() any {
+// DebugInfo returns diagnostic information about the fan-out's state.
+func (c *fanOutCore[T]) DebugInfo() any {
 	return map[string]any{
-		"inputChan":    fo.inputChan,
-		"outputChan":   fo.outputChans,
-		"outputChanSO": fo.outputSelfOwned,
+		"inputChan":    c.inputChan,
+		"outputChan":   c.outputChans,
+		"outputChanSO": c.outputSelfOwned,
 	}
 }
 
-// Returns the number of listening channels currently running.
-func (fo *FanOut[T]) Count() int {
-	return len(fo.outputChans)
+// Count returns the number of registered output channels.
+func (c *fanOutCore[T]) Count() int {
+	return len(c.outputChans)
 }
 
-// InputChan returns the channel on which messages can be sent to this runner to be fanned-out.
-func (fo *FanOut[T]) InputChan() chan<- T {
-	return fo.inputChan
+// InputChan returns the write-only input channel.
+func (c *fanOutCore[T]) InputChan() chan<- T {
+	return c.inputChan
 }
 
-// Sends a value which will be fanned out.  This is a wrapper over sending messages
-// over the input channel returned by SendChan.
-func (fo *FanOut[T]) Send(value T) {
-	fo.inputChan <- value
+// Send writes a value to the input channel for fan-out distribution.
+func (c *fanOutCore[T]) Send(value T) {
+	c.inputChan <- value
 }
 
-// Adds a new channel to which incoming messages will be fanned out to.
-// These output channels can be either added by the caller or created by this runner.
-// If the output channel was passed, then it wont be closed when this runner finishes (or is stopped).
-// A filter function can also be passed on a per output channel basis that can either transform
-// or filter messages specific to this output channel.  For example filters can be used to check
-// permissions for an incoming message wrt to an output channel.
-//
-// Output channels are added to our list of listeners asynchronously.  The wait parameter if set to true
-// will return a channel that can be read from to ensure that this output channel registration is synchronous.
-func (fo *FanOut[T]) Add(output chan<- T, filter FilterFunc[T], wait bool) (callbackChan chan error) {
+// Add registers an output channel with an optional filter.
+// If wait is true, the returned channel receives nil once registration is complete.
+func (c *fanOutCore[T]) Add(output chan<- T, filter FilterFunc[T], wait bool) (callbackChan chan error) {
 	if wait {
 		callbackChan = make(chan error, 1)
 	}
-	fo.controlChan <- fanOutCmd[T]{Name: "add", AddedChannel: output, Filter: filter, CallbackChan: callbackChan}
+	c.controlChan <- fanOutCmd[T]{Name: "add", AddedChannel: output, Filter: filter, CallbackChan: callbackChan}
 	return
 }
 
-// Adds a new output channel with an optional filter function that will be managed by this runner.
-func (fo *FanOut[T]) New(filter FilterFunc[T]) chan T {
+// New creates a new owned output channel with an optional filter.
+// The fan-out will close this channel on Remove or Stop.
+func (c *fanOutCore[T]) New(filter FilterFunc[T]) chan T {
 	output := make(chan T, 1)
-	<-fo.Add(output, filter, true)
+	callbackChan := make(chan error, 1)
+	c.controlChan <- fanOutCmd[T]{
+		Name:         "add",
+		AddedChannel: output,
+		Filter:       filter,
+		SelfOwned:    true,
+		CallbackChan: callbackChan,
+	}
+	<-callbackChan
 	return output
 }
 
-// Removes an output channel from our list of listeners.  If the channel was managed/owned by this runner then it will also be closed.
-// Just like the Add method, Removals are asynchronous.  This can be made synchronized by passing wait=true.
-func (fo *FanOut[T]) Remove(output chan<- T, wait bool) (callbackChan chan error) {
+// Remove unregisters an output channel. If the channel was created by New,
+// it is also closed.
+func (c *fanOutCore[T]) Remove(output chan<- T, wait bool) (callbackChan chan error) {
 	if wait {
 		callbackChan = make(chan error)
 	}
-	fo.controlChan <- fanOutCmd[T]{Name: "remove", RemovedChannel: output, CallbackChan: callbackChan}
+	c.controlChan <- fanOutCmd[T]{Name: "remove", RemovedChannel: output, CallbackChan: callbackChan}
 	return
 }
 
-func (fo *FanOut[T]) cleanup() {
-	if fo.selfOwnIn {
-		close(fo.inputChan)
+// cleanup releases resources common to all fan-out types.
+func (c *fanOutCore[T]) cleanup() {
+	if c.selfOwnIn {
+		close(c.inputChan)
 	}
-	// close any output channels *we* own
-	for index, ch := range fo.outputChans {
-		if fo.outputSelfOwned[index] && ch != nil {
+	for index, ch := range c.outputChans {
+		if c.outputSelfOwned[index] && ch != nil {
 			close(ch)
 		}
 	}
-	close(fo.closedChan)
-	fo.RunnerBase.cleanup()
+	close(c.closedChan)
+	c.RunnerBase.cleanup()
 }
 
-func (fo *FanOut[T]) start() {
-	fo.RunnerBase.start()
+// handleCmd processes a control command (add/remove/stop) inside the
+// goroutine's select loop. Returns true if the goroutine should exit.
+func (c *fanOutCore[T]) handleCmd(cmd fanOutCmd[T]) (shouldStop bool) {
+	if cmd.Name == "stop" {
+		return true
+	}
 
-	go func() {
-		defer fo.cleanup()
-
-		// keep reading from input and send to outputs
-		for {
-			select {
-			case event := <-fo.inputChan:
-				if fo.outputChans != nil {
-					for index, outputChan := range fo.outputChans {
-						if outputChan != nil {
-							if fo.outputFilters[index] != nil {
-								newevent := fo.outputFilters[index](&event)
-								if newevent != nil {
-									if fo.SendSync {
-										outputChan <- *newevent
-									} else {
-										go func(outputChan chan<- T, evt T) { outputChan <- evt }(outputChan, *newevent)
-									}
-								}
-							} else {
-								// log.Println("Sending Event to chan: ", index, event, outputChan)
-								if fo.SendSync {
-									outputChan <- event
-								} else {
-									go func(outputChan chan<- T, evt T) { outputChan <- evt }(outputChan, event)
-								}
-								// log.Println("Finished Sending Event to chan: ", index, event, outputChan)
-							}
-						}
-					}
-				}
-				break
-			case cmd := <-fo.controlChan:
-				if cmd.Name == "stop" {
-					return
-				}
-
-				if cmd.Name == "add" {
-					// Add a new reader to our list
-					// check for dup?
-					found := false
-					if fo.outputChans != nil {
-						// all good
-						for _, oc := range fo.outputChans {
-							if oc == cmd.AddedChannel {
-								found = true
-								// Or should we replace this?
-								log.Println("Output Channel already exists.  Will skip.  Remove it first if you want to add again or change filter funcs", cmd.AddedChannel, oc, fo.outputChans)
-								break
-							}
-						}
-					}
-					if !found {
-						fo.outputChans = append(fo.outputChans, cmd.AddedChannel)
-						fo.outputSelfOwned = append(fo.outputSelfOwned, cmd.SelfOwned)
-						fo.outputFilters = append(fo.outputFilters, cmd.Filter)
-					}
-					if cmd.CallbackChan != nil {
-						cmd.CallbackChan <- nil
-					}
-				} else if cmd.Name == "remove" {
-					// Remove an existing reader from our list
-					for index, ch := range fo.outputChans {
-						if ch == cmd.RemovedChannel {
-							// log.Println("Before Removing channel: ", ch, len(fo.outputChans), fo.outputChans)
-							if fo.outputSelfOwned[index] {
-								close(ch)
-							}
-							fo.outputSelfOwned[index] = fo.outputSelfOwned[len(fo.outputSelfOwned)-1]
-							fo.outputSelfOwned = fo.outputSelfOwned[:len(fo.outputSelfOwned)-1]
-
-							fo.outputChans[index] = fo.outputChans[len(fo.outputChans)-1]
-							fo.outputChans = fo.outputChans[:len(fo.outputChans)-1]
-
-							fo.outputFilters[index] = fo.outputFilters[len(fo.outputFilters)-1]
-							fo.outputFilters = fo.outputFilters[:len(fo.outputFilters)-1]
-							// log.Println("After Removing channel: ", ch, len(fo.outputChans), fo.outputChans)
-							break
-						}
-					}
-					if cmd.CallbackChan != nil {
-						cmd.CallbackChan <- nil
-					}
-				}
+	if cmd.Name == "add" {
+		found := false
+		for _, oc := range c.outputChans {
+			if oc == cmd.AddedChannel {
+				found = true
+				log.Println("Output Channel already exists. Will skip. Remove it first if you want to add again or change filter funcs", cmd.AddedChannel)
 				break
 			}
 		}
-	}()
+		if !found {
+			c.outputChans = append(c.outputChans, cmd.AddedChannel)
+			c.outputSelfOwned = append(c.outputSelfOwned, cmd.SelfOwned)
+			c.outputFilters = append(c.outputFilters, cmd.Filter)
+		}
+		if cmd.CallbackChan != nil {
+			cmd.CallbackChan <- nil
+		}
+	} else if cmd.Name == "remove" {
+		for index, ch := range c.outputChans {
+			if ch == cmd.RemovedChannel {
+				if c.outputSelfOwned[index] {
+					close(ch)
+				}
+				last := len(c.outputChans) - 1
+				c.outputSelfOwned[index] = c.outputSelfOwned[last]
+				c.outputSelfOwned = c.outputSelfOwned[:last]
+				c.outputChans[index] = c.outputChans[last]
+				c.outputChans = c.outputChans[:last]
+				c.outputFilters[index] = c.outputFilters[last]
+				c.outputFilters = c.outputFilters[:last]
+				break
+			}
+		}
+		if cmd.CallbackChan != nil {
+			cmd.CallbackChan <- nil
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Common functional options (work with all fan-out types)
+// ---------------------------------------------------------------------------
+
+// FanOutOption is a functional option for configuring any fan-out type.
+type FanOutOption[T any] func(*fanOutCore[T])
+
+// WithFanOutInputChan sets the input channel. The fan-out will NOT close this
+// channel on Stop (caller retains ownership).
+func WithFanOutInputChan[T any](ch chan T) FanOutOption[T] {
+	return func(c *fanOutCore[T]) {
+		c.inputChan = ch
+		c.selfOwnIn = false
+	}
+}
+
+// WithFanOutInputBuffer creates a buffered input channel of the given size.
+// The fan-out owns and will close this channel on Stop.
+func WithFanOutInputBuffer[T any](size int) FanOutOption[T] {
+	return func(c *fanOutCore[T]) {
+		c.inputChan = make(chan T, size)
+		c.selfOwnIn = true
+	}
+}
+
+// applyOpts applies common functional options to the core.
+func applyOpts[T any](c *fanOutCore[T], opts []FanOutOption[T]) {
+	for _, opt := range opts {
+		opt(c)
+	}
 }
