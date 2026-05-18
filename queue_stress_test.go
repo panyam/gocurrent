@@ -292,6 +292,37 @@ func TestStressAppendBarrierInterleaved(t *testing.T) {
 	}
 }
 
+// TestStressResolveRacesAwaitRegistration — exercises the
+// narrow race window between AwaitResolution registering its
+// wait-channel and Resolve dropping in the resolution. The
+// mutex makes this sequenced-and-safe by construction, but the
+// -race detector flags subtle issues if either path skips
+// re-checking under the lock. 200 iterations × fresh-queue per
+// iteration so the race window is the dominant timing.
+func TestStressResolveRacesAwaitRegistration(t *testing.T) {
+	const iterations = 200
+	for i := 0; i < iterations; i++ {
+		q := NewQueue[string]()
+		offset := q.Append("barrier")
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var result any
+		go func() {
+			defer wg.Done()
+			result = q.AwaitResolution(offset)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = q.Resolve(offset, "value")
+		}()
+		wg.Wait()
+		if result != "value" {
+			t.Errorf("iter %d: AwaitResolution got %v, want %q", i, result, "value")
+		}
+	}
+}
+
 // TestStressBroadcastDuringResolve — large number of
 // AwaitResolution waiters all parked on the same offset; a
 // resolver wakes them all atomically. Validates the
