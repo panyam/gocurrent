@@ -15,6 +15,10 @@
 //     Three dispatch strategies available via [SyncFanOut], [AsyncFanOut], and
 //     [QueuedFanOut] (recommended), each with different ordering/blocking trade-offs.
 //     See the [FanOuter] interface for the common API.
+//   - Queue: Append-only event log with offset-based reads, per-subscriber
+//     wake-up channels, and barrier-resolution semantics. Multi-producer,
+//     N-consumer; late subscribers can replay from offset 0. AppendBarrier
+//     blocks the producer until a consumer (or out-of-band signal) resolves.
 //   - SyncMap: A type-safe generic wrapper around sync.Map
 //
 // All concurrency primitives are designed to be composable and provide
