@@ -24,9 +24,34 @@ var ErrOffsetOutOfRange = errors.New("gocurrent: offset out of range")
 // catch up. Per-subscription capacity-1 buffer coalesces burst
 // notifies into single wake-ups (one drain per loop).
 //
-// Late subscribers see the full log from offset 0. The queue
-// preserves every appended entry indefinitely (no eviction in
-// this base type; bounded variants can layer on top).
+// Late subscribers see the full log from offset 0. By default the
+// queue preserves every appended entry indefinitely. NewBoundedQueue
+// caps how many entries are retained, evicting the oldest to bound
+// memory for long-lived logs (a token stream, say) — see the bounded
+// retention note below.
+//
+// # Bounded retention (NewBoundedQueue)
+//
+// A bounded queue retains at most maxRetain entries. When a new
+// Append would exceed that window the oldest retained entry is
+// evicted. Eviction preserves offsets: offsets stay absolute and
+// monotonically increasing (they are never renumbered), so a caller
+// holding an offset from before an eviction still names the same
+// logical position. Two things follow from that:
+//
+//   - ReadFrom / ReadAt address payloads, so they only serve the
+//     retained window. ReadFrom(offset) with an offset below the
+//     retained head degrades gracefully: it clamps up to the oldest
+//     retained entry and returns that suffix (never panics, never
+//     renumbers). ReadAt of an evicted offset returns ok=false.
+//   - Barrier resolution (Resolve / AwaitResolution / Resolution)
+//     addresses positions, not payloads, so it stays valid for any
+//     offset that was ever appended — including an evicted one. A
+//     pending barrier therefore survives eviction pressure: its
+//     resolution metadata is kept independently of the payload
+//     window. (Barriers are expected to resolve near the head, so
+//     they are rarely evicted in practice; the guarantee holds either
+//     way.)
 //
 // Barrier resolution: any entry can be tagged with a resolution
 // value via Resolve(offset, data). Other callers can
@@ -52,8 +77,22 @@ var ErrOffsetOutOfRange = errors.New("gocurrent: offset out of range")
 //	offset := q.Append(myEvent)       // async, returns offset
 //	res := q.AppendBarrier(syncEvent) // blocks until resolved
 type Queue[T any] struct {
-	mu     sync.RWMutex
+	mu sync.RWMutex
+
+	// events is the backing store. The retained window is events[head:];
+	// events[:head] are evicted slots kept only to amortize compaction and
+	// are zeroed on eviction so their payloads are collected. The absolute
+	// offset of the oldest retained entry (events[head]) is base, so the
+	// absolute offset of events[head+i] is base+i and the total number of
+	// entries ever appended is base + (len(events) - head). For an unbounded
+	// queue head and base stay 0 and this reduces to len(events).
 	events []T
+	head   int // index in events of the oldest retained entry
+	base   int // absolute offset of events[head] (== entries evicted so far)
+
+	// maxRetain caps the retained window (NewBoundedQueue). 0 means unbounded:
+	// nothing is ever evicted.
+	maxRetain int
 
 	// subs is the live subscription list. Append fans out a wake-up
 	// token to each subscription's channel (non-blocking). Snapshot
@@ -73,7 +112,7 @@ type Queue[T any] struct {
 	resolveSignals map[int]chan struct{}
 }
 
-// NewQueue returns an empty Queue ready to receive events.
+// NewQueue returns an empty, unbounded Queue ready to receive events.
 func NewQueue[T any]() *Queue[T] {
 	return &Queue[T]{
 		resolutions:    map[int]any{},
@@ -81,13 +120,36 @@ func NewQueue[T any]() *Queue[T] {
 	}
 }
 
+// NewBoundedQueue returns an empty Queue that retains at most maxRetain
+// entries, evicting the oldest as newer ones arrive. It behaves exactly like
+// NewQueue for the first maxRetain entries; past that it caps memory while
+// keeping offsets absolute and monotonic (see the "Bounded retention" note on
+// Queue). maxRetain <= 0 is treated as unbounded (identical to NewQueue).
+func NewBoundedQueue[T any](maxRetain int) *Queue[T] {
+	if maxRetain < 0 {
+		maxRetain = 0
+	}
+	q := NewQueue[T]()
+	q.maxRetain = maxRetain
+	return q
+}
+
+// totalLocked returns the number of entries ever appended (== the next offset
+// Append will assign). Caller holds q.mu (read or write).
+func (q *Queue[T]) totalLocked() int {
+	return q.base + (len(q.events) - q.head)
+}
+
 // Append commits an event to the log, returns its offset, and
 // signals every subscriber's notify channel (non-blocking).
 // Safe to call concurrently with Read / Len / Resolve.
 func (q *Queue[T]) Append(e T) int {
 	q.mu.Lock()
-	offset := len(q.events)
+	offset := q.totalLocked()
 	q.events = append(q.events, e)
+	if q.maxRetain > 0 {
+		q.evictLocked()
+	}
 	// Snapshot subscribers under lock; signal outside.
 	subs := make([]*Subscription, len(q.subs))
 	copy(subs, q.subs)
@@ -96,6 +158,30 @@ func (q *Queue[T]) Append(e T) int {
 		s.signal()
 	}
 	return offset
+}
+
+// evictLocked drops oldest entries until the retained window fits maxRetain.
+// Since Append adds one entry at a time this evicts at most one per call.
+// Eviction is amortized O(1): the head pointer advances in O(1), the evicted
+// slot is zeroed so its payload is collected, and the backing array is
+// compacted only once the dead prefix grows to a full window, which bounds the
+// backing array at ~2*maxRetain. Offsets are untouched (base rises with head),
+// so they stay absolute and monotonic. Caller holds q.mu; maxRetain > 0.
+func (q *Queue[T]) evictLocked() {
+	var zero T
+	for len(q.events)-q.head > q.maxRetain {
+		q.events[q.head] = zero // free the evicted payload
+		q.head++
+		q.base++
+	}
+	if q.head >= q.maxRetain {
+		n := copy(q.events, q.events[q.head:])
+		for i := n; i < len(q.events); i++ {
+			q.events[i] = zero
+		}
+		q.events = q.events[:n]
+		q.head = 0
+	}
 }
 
 // AppendBarrier appends e and blocks until Resolve has been called
@@ -121,15 +207,20 @@ func (q *Queue[T]) AppendBarrier(e T) any {
 func (q *Queue[T]) ReadFrom(offset int) (events []T, newOffset int) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
-	if offset < 0 {
-		offset = 0
+	total := q.totalLocked()
+	// Below the retained head (evicted, or negative): clamp up to the oldest
+	// retained offset and return that suffix. This is the graceful-degradation
+	// contract for a bounded queue — never panic, never renumber.
+	if offset < q.base {
+		offset = q.base
 	}
-	if offset >= len(q.events) {
-		return nil, len(q.events)
+	if offset >= total {
+		return nil, total
 	}
-	out := make([]T, len(q.events)-offset)
-	copy(out, q.events[offset:])
-	return out, len(q.events)
+	lo := q.head + (offset - q.base)
+	out := make([]T, total-offset)
+	copy(out, q.events[lo:])
+	return out, total
 }
 
 // ReadAt returns the event at a specific offset, or the zero
@@ -138,17 +229,21 @@ func (q *Queue[T]) ReadAt(offset int) (T, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	var zero T
-	if offset < 0 || offset >= len(q.events) {
+	// Only the retained window has payloads; an evicted (offset < base) or
+	// future offset is not available.
+	if offset < q.base || offset >= q.totalLocked() {
 		return zero, false
 	}
-	return q.events[offset], true
+	return q.events[q.head+(offset-q.base)], true
 }
 
-// Len returns the number of events in the queue.
+// Len returns the number of events ever appended (== the next offset). For a
+// bounded queue this keeps counting past evictions — it is the offset space,
+// not the retained count — so offsets stay absolute and monotonic.
 func (q *Queue[T]) Len() int {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
-	return len(q.events)
+	return q.totalLocked()
 }
 
 // Subscribe registers a new consumer and returns a *Subscription
@@ -197,7 +292,10 @@ func (q *Queue[T]) Subscribe() *Subscription {
 // log; whether they inspect resolution is their choice.
 func (q *Queue[T]) Resolve(offset int, resolution any) error {
 	q.mu.Lock()
-	if offset < 0 || offset >= len(q.events) {
+	// A barrier is a position, not a payload: any offset that was ever
+	// appended is resolvable, including one whose payload has since been
+	// evicted (resolutions live independently of the retained window).
+	if offset < 0 || offset >= q.totalLocked() {
 		q.mu.Unlock()
 		return ErrOffsetOutOfRange
 	}
@@ -232,7 +330,9 @@ func (q *Queue[T]) Resolve(offset int, resolution any) error {
 // fires (broadcast via channel close).
 func (q *Queue[T]) AwaitResolution(offset int) any {
 	q.mu.Lock()
-	if offset < 0 || offset >= len(q.events) {
+	// Positions, not payloads: an evicted offset is still awaitable (see
+	// Resolve), so a barrier pending across eviction pressure still unblocks.
+	if offset < 0 || offset >= q.totalLocked() {
 		q.mu.Unlock()
 		return nil
 	}
