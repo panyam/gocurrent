@@ -299,3 +299,236 @@ func TestConcurrentAppendsLenStable(t *testing.T) {
 		t.Errorf("Len = %d after %d concurrent appends, want %d", got, n, n)
 	}
 }
+
+// --- Bounded retention (NewBoundedQueue) ---
+
+// readErrs collects the string values in the retained window from offset 0.
+func retained(q *Queue[string]) []string {
+	evs, _ := q.ReadFrom(0)
+	return evs
+}
+
+func TestBoundedQueueEvictsOldest(t *testing.T) {
+	q := NewBoundedQueue[string](3)
+	for _, s := range []string{"a", "b", "c", "d", "e"} {
+		q.Append(s)
+	}
+	// Five appended, window of three: the last three survive.
+	got := retained(q)
+	if len(got) != 3 || got[0] != "c" || got[1] != "d" || got[2] != "e" {
+		t.Fatalf("retained window = %v, want [c d e]", got)
+	}
+	// Len is the offset space (total ever appended), not the retained count.
+	if l := q.Len(); l != 5 {
+		t.Errorf("Len = %d, want 5 (absolute offset space)", l)
+	}
+}
+
+func TestBoundedQueueOffsetsMonotonicAcrossEviction(t *testing.T) {
+	q := NewBoundedQueue[string](4)
+	const n = 100
+	for i := 0; i < n; i++ {
+		if off := q.Append("x"); off != i {
+			t.Fatalf("Append #%d returned offset %d; offsets must stay absolute and monotonic", i, off)
+		}
+	}
+	// ReadFrom advances to the absolute end, not the retained count.
+	_, newOff := q.ReadFrom(q.Len() - 4)
+	if newOff != n {
+		t.Errorf("newOffset = %d, want %d", newOff, n)
+	}
+}
+
+func TestBoundedQueueReadFromEvictedDegrades(t *testing.T) {
+	q := NewBoundedQueue[string](3)
+	for _, s := range []string{"a", "b", "c", "d", "e"} {
+		q.Append(s) // window now holds offsets 2,3,4 == c,d,e
+	}
+	// An evicted offset does not panic or renumber: it clamps up to the oldest
+	// retained entry and returns that suffix.
+	evs, newOff := q.ReadFrom(0)
+	if len(evs) != 3 || evs[0] != "c" {
+		t.Fatalf("ReadFrom(evicted) = %v, want the retained suffix [c d e]", evs)
+	}
+	if newOff != 5 {
+		t.Errorf("newOffset = %d, want 5", newOff)
+	}
+	// A live mid-window offset reads only what is new past it.
+	tail, _ := q.ReadFrom(4)
+	if len(tail) != 1 || tail[0] != "e" {
+		t.Fatalf("ReadFrom(4) = %v, want [e]", tail)
+	}
+	// A negative offset also clamps to the retained head (no panic).
+	if evs, _ := q.ReadFrom(-1); len(evs) != 3 {
+		t.Fatalf("ReadFrom(-1) = %v, want the full retained window", evs)
+	}
+}
+
+func TestBoundedQueueReadAtWindow(t *testing.T) {
+	q := NewBoundedQueue[string](3)
+	for _, s := range []string{"a", "b", "c", "d", "e"} {
+		q.Append(s) // retained offsets 2,3,4
+	}
+	if _, ok := q.ReadAt(0); ok {
+		t.Error("ReadAt(evicted offset 0) should be ok=false")
+	}
+	if v, ok := q.ReadAt(2); !ok || v != "c" {
+		t.Errorf("ReadAt(2) = (%q, %v), want (c, true)", v, ok)
+	}
+	if v, ok := q.ReadAt(4); !ok || v != "e" {
+		t.Errorf("ReadAt(4) = (%q, %v), want (e, true)", v, ok)
+	}
+	if _, ok := q.ReadAt(5); ok {
+		t.Error("ReadAt(future offset 5) should be ok=false")
+	}
+}
+
+// TestBoundedQueueBarrierSurvivesEviction pins the core invariant the mcpkit
+// event log depends on: a barrier is resolvable by its offset even after that
+// entry's payload has scrolled out of the retained window.
+func TestBoundedQueueBarrierSurvivesEviction(t *testing.T) {
+	q := NewBoundedQueue[string](2)
+	off := q.Append("ask") // offset 0
+	// Evict it out of the payload window.
+	for i := 0; i < 5; i++ {
+		q.Append("filler")
+	}
+	if _, ok := q.ReadAt(off); ok {
+		t.Fatal("precondition: the ask's payload should have been evicted")
+	}
+	if err := q.Resolve(off, "answer"); err != nil {
+		t.Fatalf("Resolve of an evicted-but-appended offset: %v", err)
+	}
+	if r := q.AwaitResolution(off); r != "answer" {
+		t.Errorf("AwaitResolution(evicted) = %v, want answer", r)
+	}
+	// An offset that was never appended is still out of range.
+	if err := q.Resolve(999, "x"); !errors.Is(err, ErrOffsetOutOfRange) {
+		t.Errorf("Resolve(never-appended) = %v, want ErrOffsetOutOfRange", err)
+	}
+}
+
+// TestBoundedQueuePendingBarrierSurvivesEvictionPressure is the concurrent
+// form: a waiter blocks on an offset while a flood of appends evicts it, then a
+// late Resolve still unblocks the waiter.
+func TestBoundedQueuePendingBarrierSurvivesEvictionPressure(t *testing.T) {
+	q := NewBoundedQueue[string](4)
+	off := q.Append("ask") // offset 0
+
+	got := make(chan any, 1)
+	go func() { got <- q.AwaitResolution(off) }()
+
+	// Hammer appends so offset 0's payload is long gone while the waiter blocks.
+	var wg sync.WaitGroup
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			q.Append("filler")
+		}()
+	}
+	wg.Wait()
+
+	select {
+	case <-got:
+		t.Fatal("AwaitResolution returned before Resolve")
+	default:
+	}
+	if err := q.Resolve(off, "answer"); err != nil {
+		t.Fatalf("Resolve under eviction pressure: %v", err)
+	}
+	select {
+	case r := <-got:
+		if r != "answer" {
+			t.Errorf("AwaitResolution = %v, want answer", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending barrier never unblocked after Resolve")
+	}
+}
+
+// TestBoundedQueueSubscribeReplayRespectsWindow: a late subscriber replays only
+// the retained window from offset 0, and still wakes on a live append.
+func TestBoundedQueueSubscribeReplayRespectsWindow(t *testing.T) {
+	q := NewBoundedQueue[string](2)
+	q.Append("a")
+	q.Append("b")
+	q.Append("c") // evicts "a"; window == [b c]
+
+	sub := q.Subscribe() // subscribes late
+	defer sub.Close()
+
+	evs, off := q.ReadFrom(0)
+	if len(evs) != 2 || evs[0] != "b" || evs[1] != "c" {
+		t.Fatalf("late replay = %v, want the retained window [b c]", evs)
+	}
+
+	q.Append("d")
+	select {
+	case <-sub.Notify():
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("late subscriber was not notified of the live append")
+	}
+	live, _ := q.ReadFrom(off)
+	if len(live) != 1 || live[0] != "d" {
+		t.Fatalf("live drain = %v, want [d]", live)
+	}
+}
+
+// TestBoundedQueueMemoryStaysBounded pins the whole point: the backing array
+// does not grow without bound as entries stream in. It peeks internal state
+// (an in-package test), asserting the backing store stays within a small
+// constant factor of the window.
+func TestBoundedQueueMemoryStaysBounded(t *testing.T) {
+	const cap = 8
+	q := NewBoundedQueue[string](cap)
+	for i := 0; i < 10000; i++ {
+		q.Append("x")
+	}
+	q.mu.RLock()
+	backing := len(q.events)
+	q.mu.RUnlock()
+	if backing > 2*cap {
+		t.Errorf("backing slice len = %d after 10000 appends, want <= %d (bounded)", backing, 2*cap)
+	}
+	if l := q.Len(); l != 10000 {
+		t.Errorf("Len = %d, want 10000 (offsets keep counting)", l)
+	}
+}
+
+func TestBoundedQueueZeroMeansUnbounded(t *testing.T) {
+	q := NewBoundedQueue[string](0)
+	for i := 0; i < 50; i++ {
+		q.Append("x")
+	}
+	if evs := retained(q); len(evs) != 50 {
+		t.Errorf("retained = %d, want 50 (maxRetain 0 is unbounded)", len(evs))
+	}
+}
+
+func TestBoundedQueueConcurrentAppendsBounded(t *testing.T) {
+	const cap = 16
+	q := NewBoundedQueue[string](cap)
+	const n = 500
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			q.Append("x")
+		}()
+	}
+	wg.Wait()
+	if l := q.Len(); l != n {
+		t.Errorf("Len = %d, want %d", l, n)
+	}
+	if evs := retained(q); len(evs) != cap {
+		t.Errorf("retained window = %d, want %d", len(evs), cap)
+	}
+	q.mu.RLock()
+	backing := len(q.events)
+	q.mu.RUnlock()
+	if backing > 2*cap {
+		t.Errorf("backing slice len = %d, want <= %d", backing, 2*cap)
+	}
+}
