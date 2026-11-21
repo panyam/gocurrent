@@ -1,6 +1,8 @@
 module github.com/panyam/gocurrent
 
-go 1.24.0
+go 1.26.0
+
+toolchain go1.27.4
 
 require github.com/stretchr/testify v1.10.0
 
