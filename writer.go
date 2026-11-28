@@ -1,7 +1,7 @@
 package gocurrent
 
 import (
-	"log"
+	"log/slog"
 )
 
 // WriterFunc is the type of the writer method used by the writer goroutine primitive to serialize its writes.
@@ -62,9 +62,6 @@ func (w *Writer[W]) DebugInfo() any {
 }
 
 func (ch *Writer[T]) cleanup() {
-	log.Println("Cleaning up writer...")
-	v := ch.msgChannel
-	defer log.Println("Finished cleaning up writer: ", v)
 	// msgChannel is NOT closed here — blocked Send() calls will see Done()
 	// and return false, avoiding the concurrent close+send race.
 	close(ch.closedChan)
@@ -108,12 +105,11 @@ func (wc *Writer[W]) start() {
 			case newRequest := <-wc.msgChannel:
 				err := wc.Write(newRequest)
 				if err != nil {
-					log.Println("Write Error: ", err)
+					slog.Debug("Write Error: ", "error", err)
 					wc.closedChan <- err
 					return
 				}
-			case controlRequest := <-wc.controlChan:
-				log.Println("Received kill signal.  Quitting Writer.", controlRequest, wc.InputChan())
+			case <-wc.controlChan:
 				return
 			}
 		}
