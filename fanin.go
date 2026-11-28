@@ -1,7 +1,5 @@
 package gocurrent
 
-import "log"
-
 type fanInCmd[T any] struct {
 	Name           string
 	AddedChannel   <-chan T
@@ -151,7 +149,6 @@ func (fi *FanIn[T]) start() {
 				fi.inputs = append(fi.inputs, input)
 			} else if cmd.Name == "remove" {
 				// Remove an existing reader from our list
-				log.Println("Removing channel: ", cmd.RemovedChannel)
 				fi.remove(cmd.RemovedChannel)
 			} else if cmd.Name == "pipe_closed" {
 				// A pipe self-terminated (its input channel was closed).

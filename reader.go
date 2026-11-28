@@ -2,7 +2,6 @@ package gocurrent
 
 import (
 	"errors"
-	"log"
 	"log/slog"
 	"net"
 )
@@ -114,7 +113,7 @@ func (rc *Reader[R]) start() {
 					if ok {
 						timedOut = nerr.Timeout()
 					}
-					log.Println("Net Error, TimedOut, Closed, errors.Is.ErrClosed: ", nerr, timedOut, errors.Is(err, net.ErrClosed), nil)
+					slog.Debug("Read Error: ", "error", err, "timedOut", timedOut, "closed", errors.Is(err, net.ErrClosed))
 				}
 
 				// Try to send, but respect stop signal
@@ -151,7 +150,6 @@ func (rc *Reader[R]) start() {
 }
 
 func (r *Reader[T]) cleanup() {
-	defer log.Println("Cleaned up reader...")
 	if r.OnDone != nil {
 		r.OnDone(r)
 	}
